@@ -1,0 +1,37 @@
+{
+  "name": "capy-water",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --go --lan --port 8081",
+    "dev": "npm start",
+    "phone": "npm start",
+    "login": "expo login",
+    "qr": "node scripts/expo-qr.js",
+    "web": "expo start --web --port 5173",
+    "build": "expo export --platform web",
+    "check": "expo install --check",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~58.0.23",
+    "expo-font": "~58.0.11",
+    "expo-haptics": "~58.0.7",
+    "expo-notifications": "~58.1.8",
+    "expo-status-bar": "~58.0.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-svg": "15.16.0",
+    "react-native-web": "^0.21.2"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "qrcode": "^1.5.4"
+  }
+}

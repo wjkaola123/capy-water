@@ -1,0 +1,6 @@
+{
+  "appId": "com.littlemarket.app",
+  "appName": "小满市集",
+  "webDir": "dist",
+  "ios": { "contentInset": "automatic" }
+}

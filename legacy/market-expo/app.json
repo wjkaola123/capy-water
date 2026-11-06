@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "小满市集",
+    "slug": "little-market",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.littlemarket.app"
+    },
+    "android": {
+      "package": "com.littlemarket.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "name": "小满市集",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-status-bar"
+    ]
+  }
+}

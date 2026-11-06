@@ -1,0 +1,79 @@
+# 卡皮补水站 🍊
+
+Expo SDK 58 + React Native 的治愈系饮水记录与提醒 App。iOS、Android、Web 共用原生组件，不使用 WebView。
+
+## 运行
+
+需要 Node.js 22.13+（本机验证环境为 Node 24）。
+
+```powershell
+cd C:\project\testapp
+npm ci
+npm start          # Expo Go，局域网 8081
+npm run web        # Web 预览 http://localhost:5173
+```
+
+手机安装支持 SDK 58 的 Expo Go，与电脑连接同一 Wi-Fi，扫描开发终端二维码。iPhone 如提示登录，请在电脑和 Expo Go 登录同一 Expo 账号，然后重新打开项目。以开发终端的实际连接地址为准。
+
+```powershell
+npm run qr         # 另存局域网二维码至 test-results/expo-go.png
+# 多网卡时可指定实际 Wi-Fi 地址：npm run qr -- 192.168.x.x
+```
+
+如果 8081 已占用，先确认是否已有本项目的 Metro 在运行；已有服务可以直接复用。手机连接失败时检查同网、VPN、访客网络隔离及 Windows 防火墙。
+
+## 已实现
+
+- **喝水小院**：原创卡皮 SVG 温泉场景，摸头互动、眨眼、漂浮轻摆、蒸汽、爱心粒子、进度环缓动、弹性按钮，以及手机触觉反馈。
+- **饮水记录**：150 / 250 / 350 / 500 ml 快捷杯量；50–1500 ml 自定义记录；即时撤销与历史记录撤销。
+- **每日目标**：500–5000 ml 自定义目标，默认 2000 ml。完成后温柔反馈，不要求继续增加饮水量。
+- **饮水手记**：本地日期统计、最近七天趋势、按日期分组的历史记录、累计陪伴天数与杯数。新用户数据为空，不混入演示记录。
+- **卡皮花园**：初始橘子、5 杯花环、12 杯温泉毛巾，可穿戴；首次记录长出植物，5 / 12 杯进一步成长。
+- **温柔提醒**：60 / 90 / 120 分钟间隔，自选起止时段，休息时段不提醒。
+- **本地保存**：AsyncStorage 顺序写入；加载失败不覆盖旧数据；保存失败可重试；跨午夜与回到前台时刷新今日统计。
+- **可访问性**：操作标签、选中状态、键盘表单、减少动态效果与手动动画开关。
+- **响应式布局**：手机底部导航和紧凑进度；桌面侧边导航和双栏小院。
+
+喝水由用户手动记录，不自动检测饮水；数据不上传，浏览器和手机分别保存，卸载或清理存储会删除记录。
+
+## 通知边界
+
+iOS / Android 使用 `expo-notifications` 的每日重复本地通知，无需推送服务器。仅在用户保存开启状态时请求系统权限。调整计划先安排新通知，再清理本 App 原计划；关闭提醒清理本 App 的计划。
+
+Web 提供页面打开时的站内提醒，关闭页面后不能通知。手机系统的权限、勿扰和节电策略会影响送达。已完成通知模块的原生打包与时间规则测试，**尚未在 iOS / Android 真机验证通知送达**。Expo Go 的本地通知支持与远程推送限制请参阅 [Expo 通知文档](https://docs.expo.dev/versions/latest/sdk/notifications/)。
+
+## 检查与构建
+
+```powershell
+npm test
+npm run check
+npx expo-doctor
+npm run build                              # 导出 Web 至 dist/
+npx expo export --platform all              # 三端 JS bundle
+node scripts/build-icon.js                  # 从 SVG 源文件重新生成 App 图标
+```
+
+验证结果：
+
+- 4 项饮水领域测试通过：输入与撤销、跨午夜 / 跨月、存储恢复与校验、提醒时段与次日处理。
+- Expo SDK 依赖检查、Expo Doctor 20 项检查通过。
+- iOS / Android / Web JavaScript bundle 导出通过。此项不等同于生成 IPA / APK 或真机验收。
+- 浏览器验证：快捷记录、自定义输入错误、刷新恢复、撤销、目标修改、手记统计、花环解锁与穿戴、提醒配置保存及关闭。
+- 检查 390 × 844 手机布局与 1440 × 1000 桌面布局。验证产生的饮水记录已清除，目标恢复 2000 ml，提醒默认关闭。
+
+## 代码
+
+| 文件                      | 职责                                   |
+| ------------------------- | -------------------------------------- |
+| `App.js`                  | 四个页面、交互、表单与动画进度         |
+| `src/CapyScene.js`        | 角色、场景、装扮与情绪动画             |
+| `src/hydration.js`        | 饮水领域规则、本地日期、校验和提醒时刻 |
+| `src/useHydration.js`     | 数据恢复、顺序持久化与时钟刷新         |
+| `src/reminders.native.js` | 原生权限与系统通知调度                 |
+| `src/reminders.web.js`    | Web 平台隔离，前台提醒由 App 驱动      |
+| `src/styles.js`           | 配色、布局与组件样式                   |
+| `assets/icon.svg`         | 可编辑的 App 图标源文件                |
+| `docs/design.md`          | 设计方向与交互原则                     |
+| `legacy/market-expo/`     | 本次改造前的市集版本归档               |
+
+版本关系以 [Expo SDK 文档](https://docs.expo.dev/versions/latest/) 为准。

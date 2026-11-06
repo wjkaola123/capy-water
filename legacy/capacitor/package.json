@@ -1,0 +1,16 @@
+{
+  "name": "little-market",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "phone": "npm run build && vite preview --host 0.0.0.0 --port 5173 --strictPort",
+    "ios:sync": "npm run build && cap sync ios",
+    "ios:open": "cap open ios"
+  },
+  "dependencies": { "@capacitor/core": "latest", "@capacitor/ios": "latest" },
+  "devDependencies": { "@capacitor/cli": "latest", "vite": "latest" }
+}
