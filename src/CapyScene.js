@@ -39,6 +39,7 @@ function Capy({
   sip = 0,
   tilt = 0,
   water = 0.8,
+  satisfied = false,
 }) {
   const waterClip = `cup-water-${React.useId().replace(/:/g, "")}`;
   let coordinate = 0;
@@ -121,7 +122,15 @@ function Capy({
       />
       <G transform={`translate(${-33 * turn} 0)`}>
         {/* Side profile naps with closed eyes; the eye opens as the face fronts. */}
-        {blink || turn < 0.5 ? (
+        {satisfied ? (
+          <Path
+            d="M281 193 Q289 186 297 193"
+            stroke="#5d4837"
+            strokeWidth="4"
+            strokeLinecap="round"
+            fill="none"
+          />
+        ) : blink || turn < 0.5 ? (
           <Path
             d="M281 189 Q289 196 297 189"
             stroke="#5d4837"
@@ -147,7 +156,15 @@ function Capy({
       {turn > 0 && (
         <G opacity={turn}>
           <Ellipse cx="290" cy="221" rx="32" ry="22" fill="#d9b58b" />
-          {blink ? (
+          {satisfied ? (
+            <Path
+              d="M315 193 Q323 186 331 193"
+              stroke="#5d4837"
+              strokeWidth="4"
+              strokeLinecap="round"
+              fill="none"
+            />
+          ) : blink ? (
             <Path
               d="M315 189 Q323 196 331 189"
               stroke="#5d4837"
@@ -190,7 +207,11 @@ function Capy({
           />
         ) : (
           <Path
-            d="M280 226 Q290 234 300 226"
+            d={
+              satisfied
+                ? "M277 225 Q290 241 303 225"
+                : "M280 226 Q290 234 300 226"
+            }
             fill="none"
             stroke="#74563f"
             strokeWidth="3"
@@ -474,6 +495,8 @@ export default function CapyScene({
             (elapsed >= 700 && elapsed < 950) ||
             (elapsed >= 1200 && elapsed < 1450) ||
             (elapsed >= 4100 && elapsed < 5800);
+          // After the swallow, beam with happy crescent eyes through the greeting.
+          const satisfied = elapsed >= 6100 && elapsed < 9500;
           if (
             !previous ||
             previous.turn !== turn ||
@@ -481,9 +504,18 @@ export default function CapyScene({
             previous.tilt !== tilt ||
             previous.water !== water ||
             previous.greeting !== greeting ||
-            previous.eyesClosed !== eyesClosed
+            previous.eyesClosed !== eyesClosed ||
+            previous.satisfied !== satisfied
           ) {
-            previous = { turn, sip, tilt, water, greeting, eyesClosed };
+            previous = {
+              turn,
+              sip,
+              tilt,
+              water,
+              greeting,
+              eyesClosed,
+              satisfied,
+            };
             setPose(previous);
           }
           frameId = requestAnimationFrame(tick);
@@ -740,6 +772,7 @@ export default function CapyScene({
             sip={pose?.sip}
             tilt={pose?.tilt}
             water={pose?.water ?? remainingWater.current}
+            satisfied={pose?.satisfied}
           />
         </Svg>
       </Animated.View>
