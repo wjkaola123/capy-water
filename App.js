@@ -21,7 +21,7 @@ import { StatusBar } from "expo-status-bar";
 import Feather from "@expo/vector-icons/Feather";
 import Svg, { Circle, Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
-import CapyScene, { CapyAvatar } from "./src/CapyScene";
+import CapyScene, { CapyAvatar, CapyEffectIcon } from "./src/CapyScene";
 import {
   companionDays,
   createEntry,
@@ -38,6 +38,20 @@ import { applyReminders, reminderPermission } from "./src/reminders";
 import { C, s } from "./src/styles";
 
 const MotionContext = React.createContext(true);
+const WATER_TOPICS = [
+  "今天，也要好好喝水",
+  "喝一口水，歇一小会儿",
+  "让清水陪你慢下来",
+  "给忙碌留一口水的时间",
+  "把水杯放在手边",
+  "口渴了，就喝一点水",
+  "一杯温水，暖暖日常",
+  "和卡皮一起，慢慢喝水",
+  "小口慢饮，刚刚好",
+  "工作间隙，喝口清水",
+  "出门前，带上水杯",
+  "每一口水，都有被记住",
+];
 const NAV = [
   { key: "home", icon: "sun", label: "喝水小院" },
   { key: "journal", icon: "bar-chart-2", label: "饮水手记" },
@@ -276,12 +290,16 @@ function AppContent() {
     now,
     refreshTime,
   } = useHydration();
-  const { width } = useWindowDimensions();
+  const windowSize = useWindowDimensions();
+  const mobilePreview = __DEV__ && Platform.OS === "web";
+  const width = mobilePreview ? Math.min(windowSize.width, 390) : windowSize.width;
   const desktop = width >= 1040,
     columns = width >= 760;
   const [page, setPage] = useState("home"),
     [selected, setSelected] = useState(250),
     [modal, setModal] = useState(null);
+  const [topicIndex, setTopicIndex] = useState(0);
+  const [drinkRun, setDrinkRun] = useState(0);
   const [customAmount, setCustomAmount] = useState(""),
     [goalInput, setGoalInput] = useState("2000");
   const [reminderDraft, setReminderDraft] = useState(state.reminder),
@@ -295,10 +313,14 @@ function AppContent() {
     toastTimer = useRef(null),
     petCount = useRef(0),
     lastWebReminder = useRef("");
+  const previewMotion =
+    __DEV__ &&
+    Platform.OS === "web" &&
+    new URLSearchParams(window.location.search).get("previewMotion") === "1";
   const total = totalForDay(state.entries, now),
     today = entriesForDay(state.entries, now),
     days = companionDays(state.entries),
-    motion = state.motion && !reduceMotion;
+    motion = state.motion && (previewMotion || !reduceMotion);
   const next = nextReminder(state.reminder, now);
   const showToast = (message, id = null) => {
     clearTimeout(toastTimer.current);
@@ -317,6 +339,14 @@ function AppContent() {
   useEffect(() => {
     scroll.current?.scrollTo({ y: 0, animated: false });
   }, [page]);
+  useEffect(() => {
+    if (page !== "home" || modal) return;
+    const timer = setInterval(() => {
+      if (AppState.currentState !== "active") return;
+      setTopicIndex((index) => (index + 1) % WATER_TOPICS.length);
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [page, modal]);
   useEffect(() => {
     if (!ready || Platform.OS !== "web" || !state.reminder.enabled) return;
     const hit = reminderSlots(state.reminder).some(
@@ -360,19 +390,23 @@ function AppContent() {
         : REPLIES[state.entries.length % REPLIES.length],
     );
     setCelebration((n) => n + 1);
+    setDrinkRun((n) => n + 1);
+    if (page === "home" || page === "garden") {
+      scroll.current?.scrollTo({ y: 0, animated: motion });
+    }
     if (Platform.OS !== "web")
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {},
       );
     setModal(null);
-    showToast(`已记录 ${amount} ml · 卡皮开心地冒了个泡`, entry.id);
+    showToast(`已记录 ${amount} ml`, entry.id);
   };
   const undo = (id) => {
     setState((previous) => ({
       ...previous,
       entries: previous.entries.filter((e) => e.id !== id),
     }));
-    showToast("这杯已撤销，记错了也没关系。");
+    showToast("已撤销记录");
   };
   const pet = () => {
     setSpeech(PET_REPLIES[petCount.current++ % PET_REPLIES.length]);
@@ -472,7 +506,7 @@ function AppContent() {
             </View>
             <View style={s.flex}>
               <Text style={s.recordTitle}>给自己补一点水</Text>
-              <Text style={s.tiny}>{time(entry.at)} · 温柔地照顾自己</Text>
+              <Text style={s.tiny}>{time(entry.at)}</Text>
             </View>
             <Text style={s.recordAmount}>
               +{entry.amount}
@@ -490,7 +524,7 @@ function AppContent() {
         ))}
         {!all && items.length > 3 && (
           <Text style={[s.tiny, { marginTop: 12 }]}>
-            今天还有 {items.length - 3} 条记录，去饮水手记看看吧。
+            另有 {items.length - 3} 条记录
           </Text>
         )}
       </View>
@@ -501,9 +535,6 @@ function AppContent() {
         </View>
         <View style={s.flex}>
           <Text style={s.recordTitle}>今天的第一杯，随时开始</Text>
-          <Text style={[s.tiny, { marginTop: 5 }]}>
-            不用赶进度，每一小口都算数。
-          </Text>
         </View>
       </View>
     );
@@ -517,7 +548,18 @@ function AppContent() {
     );
   return (
     <MotionContext.Provider value={motion}>
-      <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
+      <SafeAreaView
+        style={[
+          s.safe,
+          mobilePreview && {
+            width: "100%",
+            maxWidth: 390,
+            maxHeight: 844,
+            alignSelf: "center",
+          },
+        ]}
+        edges={["top", "bottom"]}
+      >
         <StatusBar style="dark" />
         <View style={s.app}>
           {desktop && (
@@ -531,32 +573,9 @@ function AppContent() {
                 <CapyAvatar size={49} />
                 <View>
                   <Text style={s.brandName}>卡皮补水站</Text>
-                  <Text style={s.brandEnglish}>a little sip of happiness</Text>
                 </View>
               </Pressable>
-              <Text style={s.sidebarCaption}>和卡皮一起，慢慢变好</Text>
               {navigation(false)}
-              <View style={s.sidebarBottom}>
-                <View style={s.sidebarNote}>
-                  <View style={s.row}>
-                    <Icon name="heart" size={17} color="#a5ad90" />
-                    <Text style={s.smallNote}>一口水，一点小确幸</Text>
-                  </View>
-                  <Text style={s.sidebarQuote}>
-                    不必每一天都很厉害，{"\n"}有好好照顾自己就很好。
-                  </Text>
-                  <View style={s.noteDecoration}>
-                    <View style={s.noteLine} />
-                    <Icon name="feather" size={15} color="#a4b292" />
-                    <View style={s.noteLine} />
-                  </View>
-                </View>
-                <View style={s.localNote}>
-                  <View style={s.onlineDot} />
-                  <Text style={s.tiny}>只属于你的小小角落</Text>
-                  <Icon name="lock" size={12} color="#a4ab99" />
-                </View>
-              </View>
             </View>
           )}
           <View style={s.workspace}>
@@ -590,8 +609,6 @@ function AppContent() {
                       {now.getMonth() + 1} 月 {now.getDate()} 日，星期
                       {["日", "一", "二", "三", "四", "五", "六"][now.getDay()]}
                     </Text>
-                    <View style={s.dateDot} />
-                    <Text style={s.dateLabel}>慢悠悠也很好</Text>
                   </View>
                   <Text
                     accessibilityRole="header"
@@ -599,20 +616,10 @@ function AppContent() {
                   >
                     {
                       {
-                        home: "今天，也要好好喝水",
+                        home: WATER_TOPICS[topicIndex],
                         journal: "每一小口，都有被记住",
                         garden: "把小日子，养成小花园",
                         settings: "找到舒服的生活节奏",
-                      }[page]
-                    }
-                  </Text>
-                  <Text style={s.subtitle}>
-                    {
-                      {
-                        home: "照顾自己的小事，有卡皮陪你一起。",
-                        journal: "没有完美的曲线，只有认真照顾自己的你。",
-                        garden: "喝水、发呆、慢慢长大。这是我们的小天地。",
-                        settings: "温柔的提醒，刚刚好的目标，一切由你决定。",
                       }[page]
                     }
                   </Text>
@@ -650,40 +657,26 @@ function AppContent() {
               {page === "home" && (
                 <View style={[s.dashboard, !columns && s.stack]}>
                   <View style={s.mainColumn}>
-                    <View style={[s.hero, width < 480 && { height: 310 }]}>
-                      <View style={s.heroTop} pointerEvents="none">
-                        <View>
-                          <Text style={s.heroEyebrow}>卡皮的慢生活日记</Text>
-                          <Text
-                            style={[
-                              s.heroTitle,
-                              width < 400 && { fontSize: 27 },
-                            ]}
-                          >
-                            喝一口水，{"\n"}让心情冒个泡。
-                          </Text>
-                        </View>
-                        <View style={s.weather}>
-                          <Icon name="sun" color="#b4bd91" size={27} />
-                          <Text style={s.weatherLabel}>宜 · 善待自己</Text>
-                        </View>
-                      </View>
-                      <View style={s.heroScene}>
+                    <View style={[s.hero, width < 480 && { height: 342 }]}>
+                      <View
+                        style={[
+                          s.heroScene,
+                          !columns && {
+                            transform: [{ scale: 1.12 }],
+                            transformOrigin: "center bottom",
+                          },
+                        ]}
+                      >
                         <CapyScene
                           paused={!!modal}
                           wide={columns}
                           motion={motion}
                           accessory={state.accessory}
+                          effect={state.effect}
                           celebration={celebration}
+                          drinkRequest={drinkRun}
                           onPet={pet}
                         />
-                      </View>
-                      <View style={s.heroBottom} pointerEvents="none">
-                        <View style={s.sceneTag}>
-                          <View style={s.onlineDot} />
-                          <Text style={s.sceneTagText}>卡皮正在惬意泡汤</Text>
-                        </View>
-                        <Text style={s.petHint}>点点卡皮，摸摸头</Text>
                       </View>
                     </View>
                     <View style={s.speech}>
@@ -695,7 +688,6 @@ function AppContent() {
                       >
                         {speech}
                       </Text>
-                      <Text style={s.speechName}>— 卡皮</Text>
                     </View>
                     {!columns && (
                       <View style={s.mobileProgress}>
@@ -727,11 +719,9 @@ function AppContent() {
                             ]}
                           />
                         </View>
-                        <Text style={s.tiny}>
-                          {total >= state.goal
-                            ? "今天的小目标完成啦，接下来按口渴的感觉喝水吧。"
-                            : `今天喝了 ${today.length} 杯，每一小口都算数。`}
-                        </Text>
+                        {total >= state.goal && (
+                          <Text style={s.tiny}>已达标，按口渴感喝水就好。</Text>
+                        )}
                       </View>
                     )}
                     <View style={s.drinkCard}>
@@ -740,9 +730,6 @@ function AppContent() {
                         action="自定义水量"
                         onAction={openCustom}
                       />
-                      <Text style={s.cardHint}>
-                        选一只杯子，给今天加一点水分。
-                      </Text>
                       <View style={s.cupOptions}>
                         {[150, 250, 350, 500].map((amount, i) => (
                           <Pressable
@@ -760,7 +747,7 @@ function AppContent() {
                             ]}
                           >
                             <Cup
-                              size={36 + i * 2}
+                              size={28 + i * 2}
                               level={0.35 + i * 0.18}
                               fill={selected === amount ? "#a9c28d" : "#d8e2cc"}
                             />
@@ -796,9 +783,6 @@ function AppContent() {
                         </View>
                         <Icon name="droplet" size={18} color="#cfddbd" />
                       </Button>
-                      <Text style={s.drinkFootnote}>
-                        每一口，都是爱自己的证据。
-                      </Text>
                     </View>
                     <View style={s.card}>
                       <SectionTitle
@@ -828,11 +812,9 @@ function AppContent() {
                             {Math.round((total / state.goal) * 100)}%
                             <Text style={s.percentSmall}> 已完成</Text>
                           </Text>
-                          <Text style={s.progressNote}>
-                            {total >= state.goal
-                              ? "小目标完成，给自己一个拥抱。"
-                              : `再喝 ${(state.goal - total).toLocaleString()} ml，小目标就到啦`}
-                          </Text>
+                          {total >= state.goal && (
+                            <Text style={s.tiny}>按口渴感喝水就好。</Text>
+                          )}
                         </View>
                         <View style={s.progressDivider} />
                         <View style={s.progressBottom}>
@@ -842,10 +824,6 @@ function AppContent() {
                               今天喝了{" "}
                               <Text style={s.boldGreen}>{today.length}</Text> 杯
                             </Text>
-                          </View>
-                          <View style={s.row}>
-                            <Icon name="heart" size={15} color="#b5a17f" />
-                            <Text style={s.tiny}>每一杯都算数</Text>
                           </View>
                         </View>
                       </View>
@@ -873,9 +851,6 @@ function AppContent() {
                           {next
                             ? `${dayKey(next) !== dayKey(now) ? "明天 " : ""}${time(next)}`
                             : "开启喝水提醒"}
-                          <Text style={s.reminderTimeNote}>
-                            {next ? "  休息一下，喝口水" : "  不打扰你的休息"}
-                          </Text>
                         </Text>
                       </View>
                       <Icon name="chevron-right" size={16} color="#a1aa92" />
@@ -895,19 +870,6 @@ function AppContent() {
                                 ? "被照顾的快乐"
                                 : "松弛感满满"}
                           </Text>
-                          <View style={s.moodPill}>
-                            <View
-                              style={[
-                                s.onlineDot,
-                                { backgroundColor: "#b99c70" },
-                              ]}
-                            />
-                            <Text style={s.moodText}>
-                              {total
-                                ? "和你一起，慢慢变好"
-                                : "等你一起喝第一杯水"}
-                            </Text>
-                          </View>
                         </View>
                       </View>
                       <Text style={s.friendQuote}>
@@ -939,9 +901,6 @@ function AppContent() {
                         now={now}
                         compact
                       />
-                      <Text style={s.weekFootnote}>
-                        不是打卡任务，是对自己的关心。
-                      </Text>
                     </View>
                   </View>
                 </View>
@@ -963,9 +922,6 @@ function AppContent() {
                   </View>
                   <View style={s.card}>
                     <SectionTitle title="最近七天的水分" icon="bar-chart-2" />
-                    <Text style={s.cardHint}>
-                      单位 ml · 空白也是生活的一部分，随时可以重新开始。
-                    </Text>
                     <WeekChart
                       entries={state.entries}
                       goal={state.goal}
@@ -1015,9 +971,6 @@ function AppContent() {
                     <View style={s.rowBetween}>
                       <View style={s.flex}>
                         <Text style={s.gardenHeading}>卡皮的温泉小院</Text>
-                        <Text style={s.subtitle}>
-                          不用做什么，待在一起就很美好。
-                        </Text>
                       </View>
                       <View style={s.gardenBadge}>
                         <Icon name="feather" size={16} />
@@ -1031,7 +984,9 @@ function AppContent() {
                         paused={!!modal}
                         motion={motion}
                         accessory={state.accessory}
+                        effect={state.effect}
                         celebration={celebration}
+                        drinkRequest={drinkRun}
                         onPet={pet}
                         garden={state.entries.length > 0}
                         growth={
@@ -1053,10 +1008,42 @@ function AppContent() {
                     </View>
                   </View>
                   <View style={s.card}>
+                    <SectionTitle title="给快乐加点特效" icon="sun" />
+                    <View style={s.effectOptions} accessibilityRole="radiogroup" accessibilityLabel="卡皮互动特效">
+                      {[
+                        ["hearts", "爱心泡泡"],
+                        ["stars", "星光闪闪"],
+                        ["petals", "花瓣轻舞"],
+                      ].map(([id, title]) => (
+                        <Pressable
+                          key={id}
+                          accessibilityRole="radio"
+                          accessibilityLabel={title}
+                          accessibilityState={{ checked: state.effect === id }}
+                          aria-checked={state.effect === id}
+                          onPress={() => {
+                            setState((previous) => ({ ...previous, effect: id }));
+                            setCelebration((count) => count + 1);
+                            scroll.current?.scrollTo({ y: 0, animated: motion });
+                          }}
+                          style={[
+                            s.effectOption,
+                            state.effect === id && s.cupSelected,
+                          ]}
+                        >
+                          <CapyEffectIcon effect={id} />
+                          <Text style={s.effectLabel}>{title}</Text>
+                          {state.effect === id && (
+                            <View style={s.cupCheck}>
+                              <Icon name="check" size={9} color="#fff" />
+                            </View>
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                  <View style={s.card}>
                     <SectionTitle title="给卡皮换个小装扮" icon="smile" />
-                    <Text style={s.cardHint}>
-                      每一杯真实的记录，都会让陪伴多一点点。
-                    </Text>
                     <View
                       style={[
                         s.accessories,
@@ -1115,7 +1102,6 @@ function AppContent() {
                           >
                             <CapyAvatar size={85} accessory={item.id} />
                             <Text style={s.accessoryTitle}>{item.title}</Text>
-                            <Text style={s.tiny}>{item.note}</Text>
                             <View style={s.accessoryPill}>
                               <Icon
                                 name={
@@ -1140,13 +1126,6 @@ function AppContent() {
                       })}
                     </View>
                   </View>
-                  <View style={s.gardenMessage}>
-                    <Icon name="heart" size={20} color="#b89574" />
-                    <Text style={s.gardenMessageText}>
-                      装扮慢慢收集就好，不必为了奖励多喝水。{"\n"}
-                      对卡皮来说，你的到来就是最好的礼物。
-                    </Text>
-                  </View>
                 </View>
               )}
               {page === "settings" && (
@@ -1161,9 +1140,6 @@ function AppContent() {
                     >
                       <View style={s.flex}>
                         <Text style={s.settingTitle}>每日饮水目标</Text>
-                        <Text style={s.settingDescription}>
-                          按自己的需要调整，舒服最重要
-                        </Text>
                       </View>
                       <Text style={s.settingValue}>{state.goal} ml</Text>
                       <Icon name="chevron-right" size={17} color={C.muted} />
@@ -1176,11 +1152,11 @@ function AppContent() {
                     >
                       <View style={s.flex}>
                         <Text style={s.settingTitle}>温柔提醒</Text>
-                        <Text style={s.settingDescription}>
-                          {state.reminder.enabled
-                            ? `${state.reminder.start}:00–${state.reminder.end}:00，每 ${state.reminder.interval} 分钟`
-                            : "在你选好的时间，提醒你照顾自己"}
-                        </Text>
+                        {state.reminder.enabled && (
+                          <Text style={s.settingDescription}>
+                            {`${state.reminder.start}:00–${state.reminder.end}:00，每 ${state.reminder.interval} 分钟`}
+                          </Text>
+                        )}
                       </View>
                       <Text style={s.settingValue}>
                         {state.reminder.enabled ? "已开启" : "未开启"}
@@ -1193,9 +1169,6 @@ function AppContent() {
                     <View style={s.settingsRow}>
                       <View style={s.flex}>
                         <Text style={s.settingTitle}>小院动画</Text>
-                        <Text style={s.settingDescription}>
-                          呼吸、蒸汽、漂浮和喝水时的小爱心
-                        </Text>
                       </View>
                       <Switch
                         accessibilityLabel="小院动画"
@@ -1210,11 +1183,11 @@ function AppContent() {
                         thumbColor="#ffffff"
                       />
                     </View>
-                    <Text style={s.settingFootnote}>
-                      {reduceMotion
-                        ? "系统已开启减少动态效果，小院会保持安静。"
-                        : "也会尊重系统的“减少动态效果”设置。"}
-                    </Text>
+                    {state.motion && (previewMotion || reduceMotion) && (
+                      <Text style={s.settingFootnote}>
+                        {previewMotion ? "正在预览动画" : "系统已开启减少动态效果"}
+                      </Text>
+                    )}
                   </View>
                   <View style={s.privacyCard}>
                     <View style={s.row}>
@@ -1222,42 +1195,24 @@ function AppContent() {
                       <Text style={s.cardTitle}>你的日常，只留在这里</Text>
                     </View>
                     <Text style={s.privacyText}>
-                      饮水记录和偏好保存在当前设备，无需注册，也不会上传。浏览器与手机分别保存，卸载
-                      App 或清除浏览器数据会移除记录。
+                      记录和偏好仅保存在当前设备。卸载 App 或清除浏览器数据会移除记录。
                     </Text>
-                    <Text style={s.privacyText}>
-                      记录由你手动添加，卡皮不会自动检测饮水。默认目标只是一个可调整的起点，请按个人情况设置。
-                    </Text>
-                    {Platform.OS === "web" && (
-                      <Text style={s.privacyText}>
-                        网页版在页面打开时提供提醒；手机 App
-                        使用系统本地通知，后台也能提醒。通知能否送达取决于系统权限和勿扰设置。
-                      </Text>
-                    )}
                   </View>
                   <View style={s.about}>
                     <CapyAvatar size={50} />
                     <Text style={s.aboutTitle}>卡皮补水站</Text>
-                    <Text style={s.tiny}>
-                      v1.0 · 把照顾自己，变成一件温柔的小事
-                    </Text>
+                    <Text style={s.tiny}>v1.0</Text>
                   </View>
                 </View>
               )}
-              <View style={s.footer}>
-                <View style={s.footerLine} />
-                <Icon name="feather" size={14} color="#aab59c" />
-                <Text style={s.footerText}>慢慢喝水，慢慢生活</Text>
-                <View style={s.footerLine} />
-              </View>
             </ScrollView>
             {!desktop && navigation(true)}
             {toast && (
               <View
-                style={[s.toast, !desktop && { bottom: 86 }]}
+                style={[s.toast, !desktop && { bottom: 82 }]}
                 accessibilityLiveRegion="polite"
               >
-                <Icon name="check-circle" color="#d4e4bd" size={19} />
+                <Icon name="check-circle" color="#d4e4bd" size={16} />
                 <Text style={s.toastText}>{toast.message}</Text>
                 {toast.id && (
                   <Pressable
@@ -1269,13 +1224,16 @@ function AppContent() {
                     <Text style={s.toastUndoText}>撤销</Text>
                   </Pressable>
                 )}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="关闭提示"
-                  onPress={() => setToast(null)}
-                >
-                  <Icon name="x" size={17} color="#d4e4bd" />
-                </Pressable>
+                {!toast.id && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="关闭提示"
+                    onPress={() => setToast(null)}
+                    style={s.toastClose}
+                  >
+                    <Icon name="x" size={17} color="#d4e4bd" />
+                  </Pressable>
+                )}
               </View>
             )}
           </View>
@@ -1334,13 +1292,6 @@ function AppContent() {
                       ? "自己的节奏，自己定"
                       : "记录一杯小小关心"}
                 </Text>
-                <Text style={s.modalDescription}>
-                  {modal === "reminder"
-                    ? "在清醒的时间陪你喝水，休息时不打扰。"
-                    : modal === "goal"
-                      ? "目标可以随时调整，不需要和别人一样。"
-                      : "刚刚喝了多少水？卡皮帮你记下来。"}
-                </Text>
                 {modal === "water" && (
                   <>
                     <View style={s.amountInputRow}>
@@ -1363,7 +1314,7 @@ function AppContent() {
                       <Text style={s.amountUnit}>ml</Text>
                     </View>
                     <Text style={s.inputHelp}>
-                      单次可记录 50–1500 ml，请填写实际饮水量。
+                      50–1500 ml
                     </Text>
                     <View style={s.presetRow}>
                       {[150, 250, 350, 500].map((amount) => (
@@ -1482,14 +1433,8 @@ function AppContent() {
                       <Icon name="moon" size={16} color="#93a180" />
                       <Text
                         style={s.reminderPreviewText}
-                      >{`${reminderDraft.end}:00 至次日 ${reminderDraft.start}:00，卡皮也要睡个好觉。`}</Text>
+                      >{`休息时段 ${reminderDraft.end}:00 至次日 ${reminderDraft.start}:00`}</Text>
                     </View>
-                    {Platform.OS === "web" && (
-                      <Text style={s.inputHelp}>
-                        关闭网页后无法提醒；在手机 App
-                        中开启，可使用系统本地通知。
-                      </Text>
-                    )}
                   </>
                 )}
                 {!!formError && (
@@ -1519,7 +1464,6 @@ function AppContent() {
                   }
                   style={{ marginTop: 24 }}
                 />
-                <Text style={s.modalFooter}>卡皮陪你，把自己照顾好。</Text>
               </ScrollView>
             </View>
           </KeyboardAvoidingView>

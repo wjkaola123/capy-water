@@ -60,3 +60,16 @@ test("提醒遵循清醒时段，过了最后一条顺延明天", () => {
   assert.equal(nextReminder({ ...config, enabled: false }), null);
   assert.deepEqual(reminderSlots({ ...config, interval: 0 }), []);
 });
+test("互动特效可恢复，旧数据和未知特效使用爱心", () => {
+  const legacy = { ...INITIAL_STATE };
+  delete legacy.effect;
+  assert.equal(restoreHydration(JSON.stringify(legacy)).effect, "hearts");
+  for (const effect of ["hearts", "stars", "petals"]) {
+    const restored = restoreHydration(JSON.stringify({ ...legacy, effect }));
+    assert.equal(restored.effect, effect);
+  }
+  assert.equal(
+    restoreHydration(JSON.stringify({ ...legacy, effect: "unknown" })).effect,
+    "hearts",
+  );
+});

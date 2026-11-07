@@ -4,6 +4,7 @@ export const INITIAL_STATE = {
   entries: [],
   goal: 2000,
   accessory: "orange",
+  effect: "hearts",
   motion: true,
   reminder: { enabled: false, interval: 90, start: 8, end: 21 },
 };
@@ -116,5 +117,8 @@ export function restoreHydration(raw) {
       ? input.accessory
       : "orange",
     motion: input.motion !== false,
+    effect: ["hearts", "stars", "petals"].includes(input.effect)
+      ? input.effect
+      : "hearts",
   };
 }
