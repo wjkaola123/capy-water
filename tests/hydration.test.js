@@ -11,7 +11,46 @@ import {
   reminderSlots,
   nextReminder,
   companionDays,
+  waterGardenData,
 } from "../src/hydration.js";
+
+test("水分花园按本地日期统计7、30、90天，平均值只计记录日", () => {
+  const now = new Date(2027, 0, 2, 0, 5);
+  const entries = [
+    createEntry(250, new Date(2026, 11, 31, 23, 59)),
+    createEntry(500, new Date(2027, 0, 2, 0, 1)),
+    createEntry(250, new Date(2027, 0, 2, 0, 2)),
+    createEntry(1000, new Date(2027, 0, 3)),
+    createEntry(1000, new Date(2026, 8, 1)),
+  ];
+  for (const range of [7, 30, 90]) {
+    const result = waterGardenData(entries, range, now);
+    assert.equal(result.days.length, range);
+    assert.equal(result.days.at(-1).key, "2027-01-02");
+    assert.equal(result.days.at(-1).cups, 2);
+    assert.equal(result.total, 1000);
+    assert.equal(result.recordedDays, 2);
+    assert.equal(result.average, 500);
+  }
+  assert.equal(waterGardenData([], 30, now).average, 0);
+  assert.equal(waterGardenData([], 30, new Date(2026, 2, 1)).days[0].key, "2026-01-31");
+});
+
+test("饮料选择可恢复，旧数据和未知饮料默认使用茶", () => {
+  const legacy = { ...INITIAL_STATE };
+  delete legacy.beverage;
+  assert.equal(restoreHydration(JSON.stringify(legacy)).beverage, "tea");
+  for (const beverage of ["tea", "coffee", "juice"]) {
+    assert.equal(
+      restoreHydration(JSON.stringify({ ...legacy, beverage })).beverage,
+      beverage,
+    );
+  }
+  assert.equal(
+    restoreHydration(JSON.stringify({ ...legacy, beverage: "unknown" })).beverage,
+    "tea",
+  );
+});
 
 test("饮水记录只接受合理的整数，撤销不会影响其他记录", () => {
   for (const invalid of [0, -1, 49, 1501, NaN, 250.5, "250"])

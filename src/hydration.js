@@ -5,6 +5,7 @@ export const INITIAL_STATE = {
   goal: 2000,
   accessory: "orange",
   effect: "hearts",
+  beverage: "tea",
   motion: true,
   reminder: { enabled: false, interval: 90, start: 8, end: 21 },
 };
@@ -50,6 +51,26 @@ export function weekData(entries, now = new Date()) {
 }
 export function companionDays(entries) {
   return new Set(entries.map((e) => dayKey(e.at))).size;
+}
+
+export function waterGardenData(entries, range = 7, now = new Date()) {
+  const length = [7, 30, 90].includes(range) ? range : 7;
+  const totals = new Map();
+  for (const entry of entries) {
+    const key = dayKey(entry.at);
+    const previous = totals.get(key) || { amount: 0, cups: 0 };
+    totals.set(key, { amount: previous.amount + entry.amount, cups: previous.cups + 1 });
+  }
+  const days = Array.from({ length }, (_, index) => {
+    const date = new Date(now);
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - length + 1 + index);
+    const key = dayKey(date);
+    return { key, date, ...(totals.get(key) || { amount: 0, cups: 0 }) };
+  });
+  const total = days.reduce((sum, day) => sum + day.amount, 0);
+  const recordedDays = days.filter((day) => day.cups > 0).length;
+  return { days, total, recordedDays, average: recordedDays ? Math.round(total / recordedDays) : 0 };
 }
 export function reminderSlots({ start, end, interval }) {
   const slots = [];
@@ -120,5 +141,8 @@ export function restoreHydration(raw) {
     effect: ["hearts", "stars", "petals"].includes(input.effect)
       ? input.effect
       : "hearts",
+    beverage: ["tea", "coffee", "juice"].includes(input.beverage)
+      ? input.beverage
+      : "tea",
   };
 }

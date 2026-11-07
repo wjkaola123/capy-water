@@ -21,19 +21,19 @@ import { StatusBar } from "expo-status-bar";
 import Feather from "@expo/vector-icons/Feather";
 import Svg, { Circle, Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
-import CapyScene, { CapyAvatar, CapyEffectIcon } from "./src/CapyScene";
+import CapyScene, { CapyAvatar, CapyEffectIcon, CapyBeverageIcon } from "./src/CapyScene";
 import {
   companionDays,
   createEntry,
   entriesForDay,
-  nextReminder,
   reminderSlots,
   totalForDay,
   validAmount,
-  weekData,
+  waterGardenData,
   dayKey,
 } from "./src/hydration";
 import { useHydration } from "./src/useHydration";
+import { createGardenDemo } from "./src/gardenDemo";
 import { applyReminders, reminderPermission } from "./src/reminders";
 import { C, s } from "./src/styles";
 
@@ -241,44 +241,163 @@ function ProgressRing({ total, goal, motion }) {
     </View>
   );
 }
-function WeekChart({ entries, goal, now, compact = false }) {
-  const days = weekData(entries, now),
-    max = Math.max(goal, ...days.map((d) => d.amount));
+function GardenPlant({ height = 44, size = 32 }) {
   return (
-    <View style={[s.chart, compact && { height: 125 }]}>
-      {days.map((d, i) => (
-        <View
-          key={d.key}
-          style={s.chartColumn}
-          accessibilityLabel={`${d.date.getMonth() + 1}月${d.date.getDate()}日，${d.amount}毫升`}
-        >
-          {!compact && <Text style={s.chartValue}>{d.amount || "—"}</Text>}
-          <View style={[s.barTrack, compact && { height: 75 }]}>
-            <View
-              style={[
-                s.barFill,
-                {
-                  height: d.amount
-                    ? `${Math.max((d.amount / max) * 100, 4)}%`
-                    : 3,
-                  backgroundColor: i === 6 ? C.green : "#c7d5b7",
-                },
-              ]}
-            />
-          </View>
-          <Text
-            style={[
-              s.chartLabel,
-              i === 6 && { color: C.green, fontWeight: "700" },
-            ]}
-          >
-            {d.label}
-          </Text>
+    <Svg width={size} height={height} viewBox="0 0 40 80" aria-hidden={true}>
+      <Path d="M20 76 V23" stroke="#789b70" strokeWidth="3" strokeLinecap="round" fill="none" />
+      <Path d="M20 48 C0 49 0 28 5 28 C17 28 20 38 20 48Z" fill="#b9cfae" />
+      <Path d="M20 35 C20 18 32 14 37 18 C38 30 30 37 20 35Z" fill="#789b70" />
+      <Path d="M20 63 C23 48 33 45 38 49 C37 61 30 66 20 63Z" fill="#b9cfae" />
+      <Path d="M6 77 Q20 73 34 77" stroke="#cddcc2" strokeWidth="4" strokeLinecap="round" fill="none" />
+    </Svg>
+  );
+}
+
+function WaterGarden({ entries, now }) {
+  const [range, setRange] = useState(7);
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [demo, setDemo] = useState(() => __DEV__ && Platform.OS === "web" && new URLSearchParams(window.location.search).get("gardenDemo") === "1");
+  const demoEntries = React.useMemo(() => __DEV__ ? createGardenDemo(now) : [], [dayKey(now)]);
+  const data = waterGardenData(demo ? demoEntries : entries, range, now);
+  const selected = data.days.find((day) => day.key === selectedKey) || data.days.at(-1);
+  const todayKey = dayKey(now);
+  const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+  const cells = [ ...Array(data.days[0].date.getDay()).fill(null), ...data.days ];
+  while (cells.length % 7) cells.push(null);
+  const weeks = Array.from({ length: cells.length / 7 }, (_, index) => cells.slice(index * 7, index * 7 + 7));
+  const renderDay = (day, compact = false, index = 0) => day ? (
+    <Pressable
+      key={day.key}
+      accessibilityRole="button"
+      accessibilityLabel={`${day.key}，${day.cups ? `${day.amount}毫升，${day.cups}杯` : "未记录"}${day.key === todayKey ? "，今天" : ""}`}
+      accessibilityState={{ selected: day.key === selected.key }}
+      aria-pressed={day.key === selected.key}
+      onPress={() => setSelectedKey(day.key)}
+      style={[s.gardenDay, compact && s.gardenDayCompact, day.cups > 0 && s.gardenDayRecorded, day.key === selected.key && s.gardenDaySelected]}
+    >
+      {day.key === todayKey ? <Icon name="sun" size={compact ? 12 : 18} color="#eea342" />
+        : day.cups > 0 ? <Icon name="feather" size={compact ? 11 : 17} color={C.green} />
+        : <View style={s.gardenSoil} />}
+      {!compact && <Text style={s.gardenDate}>{day.date.getDate()}</Text>}
+    </Pressable>
+  ) : <View key={`blank-${index}`} style={[s.gardenDay, compact && s.gardenDayCompact, { backgroundColor: "transparent" }]} />;
+  return (
+    <View style={s.card}>
+      <SectionTitle title="卡皮的水分花园" icon="feather" />
+      <Text style={s.beverageHint}>每一口水，都在这里留下小小的绿意。</Text>
+      {__DEV__ && (
+        <View style={s.gardenDemoBanner}>
+          <Text style={s.gardenDemoText}>{demo ? "正在预览 90 天演示数据，仅用于这块花园，不计入真实记录。" : "想看看花园长满后的样子？"}</Text>
+          <Pressable accessibilityRole="button" onPress={() => { setDemo((value) => !value); setSelectedKey(null); }} style={s.gardenDemoButton}>
+            <Text style={s.gardenDemoButtonText}>{demo ? "查看真实数据" : "预览演示数据"}</Text>
+          </Pressable>
         </View>
-      ))}
+      )}
+      <View style={s.gardenRanges} accessibilityRole="radiogroup" accessibilityLabel="统计时间范围">
+        {[7, 30, 90].map((value) => (
+          <Pressable key={value} accessibilityRole="radio" accessibilityLabel={`近${value}天`} accessibilityState={{ checked: range === value }} aria-checked={range === value}
+            onPress={() => { setRange(value); setSelectedKey(null); }} style={[s.gardenRange, range === value && s.gardenRangeActive]}>
+            <Text style={[s.gardenRangeText, range === value && { color: C.green, fontWeight: "700" }]}>近 {value} 天</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={s.gardenPeriod}>{data.days[0].key.replaceAll("-", ".")} — {data.days.at(-1).key.replaceAll("-", ".")}</Text>
+      {range === 7 ? (
+        <View style={s.gardenWeek}>
+          {data.days.map((day) => (
+            <Pressable key={day.key} accessibilityRole="button" accessibilityLabel={`${day.key}，${day.cups ? `${day.amount}毫升，${day.cups}杯` : "未记录"}`}
+              accessibilityState={{ selected: day.key === selected.key }} aria-pressed={day.key === selected.key} onPress={() => setSelectedKey(day.key)} style={[s.gardenPlantColumn, day.key === selected.key && s.gardenPlantSelected]}>
+              <Text style={s.gardenWeekAmount}>{day.cups ? day.amount.toLocaleString() : "—"}</Text>
+              <View style={s.gardenPlantBed}>
+                {day.cups > 0 ? <GardenPlant height={35 + Math.min(day.amount / 2000, 1) * 45} /> : <View style={s.gardenSoil} />}
+              </View>
+              <Text style={s.gardenDate}>{day.key === todayKey ? "今天" : weekdays[day.date.getDay()]}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : range === 30 ? (
+        <View style={{ gap: 5 }}>
+          <View style={s.gardenCalendarRow}>{weekdays.map((label) => <Text key={label} style={s.gardenWeekday}>{label}</Text>)}</View>
+          {weeks.map((week, index) => <View key={index} style={s.gardenCalendarRow}>{week.map((day, dayIndex) => renderDay(day, false, dayIndex))}</View>)}
+        </View>
+      ) : (
+        <View style={s.gardenQuarter}>
+          <View style={s.gardenWeekAxis}>{weekdays.map((label) => <Text key={label} style={s.gardenAxisLabel}>{label}</Text>)}</View>
+          {weeks.map((week, index) => <View key={index} style={s.gardenWeekColumn}>{week.map((day, dayIndex) => renderDay(day, true, dayIndex))}</View>)}
+        </View>
+      )}
+      <View style={s.gardenLegend}>
+        <Icon name="feather" size={12} /><Text style={s.tiny}>有记录</Text>
+        <View style={s.gardenSoil} /><Text style={s.tiny}>未记录</Text>
+        <Icon name="sun" size={12} color="#eea342" /><Text style={s.tiny}>今天</Text>
+      </View>
+      {range === 90 && <Text style={s.gardenFootnote}>每列是一周，从左往右读。点一点，看看那一天。</Text>}
+      <View style={s.gardenDetail} accessibilityLiveRegion="polite">
+        <Text style={s.gardenDetailDate}>{selected.key}</Text>
+        <Text style={s.gardenDetailText}>{selected.cups ? `${selected.amount.toLocaleString()} ml · ${selected.cups} 杯` : "这一天还没有记录"}</Text>
+      </View>
+      <View style={s.gardenSummary}>
+        {[[`${data.total.toLocaleString()} ml`, "累计记录水量"], [`${data.recordedDays} 天`, "有记录的日子"], [`${data.average.toLocaleString()} ml`, "记录日平均"]].map(([value, label]) => (
+          <View key={label} style={s.gardenSummaryItem}>
+            <Text style={s.gardenSummaryValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+            <Text style={s.gardenSummaryLabel}>{label}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={s.gardenFootnote}>未记录不代表没有喝水。慢慢来，随时都能继续。</Text>
     </View>
   );
 }
+
+function ToastMessage({ toast, motion, desktop, onUndo, onDismiss }) {
+  const progress = useRef(new Animated.Value(0)).current;
+  const dismiss = React.useCallback(() => {
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: motion ? 160 : 0,
+      easing: Easing.in(Easing.quad),
+      useNativeDriver: Platform.OS !== "web",
+    }).start(({ finished }) => {
+      if (finished) onDismiss();
+    });
+  }, [motion, onDismiss, progress]);
+  useEffect(() => {
+    progress.setValue(0);
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: motion ? 220 : 0,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== "web",
+    }).start();
+    const timer = setTimeout(dismiss, toast.id ? 2400 : toast.message.length > 22 ? 3500 : 2000);
+    return () => {
+      clearTimeout(timer);
+      progress.stopAnimation();
+    };
+  }, [toast, motion, dismiss, progress]);
+  return (
+    <Animated.View
+      style={[s.toast, !desktop && { bottom: 82 }, {
+        opacity: progress,
+        transform: [{ translateY: motion ? progress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) : 0 }],
+      }]}
+      accessibilityLiveRegion="polite"
+    >
+      <Icon name="check-circle" color="#d4e4bd" size={16} />
+      <Text style={s.toastText}>{toast.message}</Text>
+      {toast.id ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="撤销刚刚的饮水记录" onPress={() => onUndo(toast.id)} style={s.toastUndo}>
+          <Text style={s.toastUndoText}>撤销</Text>
+        </Pressable>
+      ) : (
+        <Pressable accessibilityRole="button" accessibilityLabel="关闭提示" onPress={dismiss} style={s.toastClose}>
+          <Icon name="x" size={17} color="#d4e4bd" />
+        </Pressable>
+      )}
+    </Animated.View>
+  );
+}
+
 function AppContent() {
   const {
     state,
@@ -310,7 +429,6 @@ function AppContent() {
     [toast, setToast] = useState(null),
     [reduceMotion, setReduceMotion] = useState(false);
   const scroll = useRef(null),
-    toastTimer = useRef(null),
     petCount = useRef(0),
     lastWebReminder = useRef("");
   const previewMotion =
@@ -321,13 +439,10 @@ function AppContent() {
     today = entriesForDay(state.entries, now),
     days = companionDays(state.entries),
     motion = state.motion && (previewMotion || !reduceMotion);
-  const next = nextReminder(state.reminder, now);
   const showToast = (message, id = null) => {
-    clearTimeout(toastTimer.current);
     setToast({ message, id });
-    toastTimer.current = setTimeout(() => setToast(null), id ? 7000 : 5000);
   };
-  useEffect(() => () => clearTimeout(toastTimer.current), []);
+  const dismissToast = React.useCallback(() => setToast(null), []);
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
     const sub = AccessibilityInfo.addEventListener(
@@ -672,6 +787,7 @@ function AppContent() {
                           wide={columns}
                           motion={motion}
                           accessory={state.accessory}
+                          beverage={state.beverage}
                           effect={state.effect}
                           celebration={celebration}
                           drinkRequest={drinkRun}
@@ -788,13 +904,11 @@ function AppContent() {
                       <SectionTitle
                         title="今日的小小足迹"
                         icon="clock"
-                        action="查看手记"
-                        onAction={() => setPage("journal")}
                       />
                       {recordList(today)}
                     </View>
                   </View>
-                  <View style={[s.sideColumn, !columns && { width: "100%" }]}>
+                  {columns && <View style={s.sideColumn}>
                     {columns && (
                       <View style={s.progressCard}>
                         <SectionTitle
@@ -828,116 +942,28 @@ function AppContent() {
                         </View>
                       </View>
                     )}
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="设置喝水提醒"
-                      onPress={openReminder}
-                      style={s.reminderCard}
-                    >
-                      <View style={s.reminderIcon}>
-                        <Icon
-                          name={state.reminder.enabled ? "bell" : "bell-off"}
-                          size={20}
-                          color="#8a9973"
-                        />
-                      </View>
-                      <View style={s.flex}>
-                        <Text style={s.reminderTitle}>
-                          {state.reminder.enabled
-                            ? "下一次温柔提醒"
-                            : "让卡皮轻轻提醒你"}
-                        </Text>
-                        <Text style={s.reminderTime}>
-                          {next
-                            ? `${dayKey(next) !== dayKey(now) ? "明天 " : ""}${time(next)}`
-                            : "开启喝水提醒"}
-                        </Text>
-                      </View>
-                      <Icon name="chevron-right" size={16} color="#a1aa92" />
-                    </Pressable>
-                    <View style={s.friendCard}>
-                      <View style={s.rowBetween}>
-                        <Text style={s.cardTitle}>今日份好心情</Text>
-                        <Icon name="heart" size={17} color="#b7936e" />
-                      </View>
-                      <View style={s.friendStatus}>
-                        <CapyAvatar size={67} accessory={state.accessory} />
-                        <View>
-                          <Text style={s.friendMood}>
-                            {total >= state.goal
-                              ? "幸福感满格"
-                              : total > 0
-                                ? "被照顾的快乐"
-                                : "松弛感满满"}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={s.friendQuote}>
-                        “
-                        {total >= state.goal
-                          ? "今天有被你好好照顾到呢。现在就安心地放松吧。"
-                          : "世界催你快一点，卡皮只想陪你慢一点。"}
-                        ”
-                      </Text>
-                      <View style={s.friendDivider} />
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => setPage("garden")}
-                        style={s.rowBetween}
-                      >
-                        <Text style={s.friendLink}>去我们的小花园坐坐</Text>
-                        <Icon name="arrow-up-right" size={17} color="#9c805b" />
-                      </Pressable>
-                    </View>
-                    <View style={s.smallWeek}>
-                      <SectionTitle
-                        title="这一周的小坚持"
-                        action="更多"
-                        onAction={() => setPage("journal")}
-                      />
-                      <WeekChart
-                        entries={state.entries}
-                        goal={state.goal}
-                        now={now}
-                        compact
-                      />
-                    </View>
-                  </View>
+                  </View>}
                 </View>
               )}
               {page === "journal" && (
                 <View style={s.pageStack}>
                   <View style={s.statRow}>
                     {[
-                      [`${total.toLocaleString()}`, "今日饮水 · ml", "droplet"],
-                      [`${days}`, "有记录的日子 · 天", "sun"],
-                      [`${state.entries.length}`, "累计记录 · 杯", "coffee"],
-                    ].map(([value, label, icon]) => (
-                      <View key={label} style={s.statCard}>
-                        <Icon name={icon} size={21} color="#91a57b" />
-                        <Text style={s.statValue}>{value}</Text>
-                        <Text style={s.tiny}>{label}</Text>
+                      [`${total.toLocaleString()}`, "今日饮水", "droplet", "ml"],
+                      [`${days}`, "记录天数", "sun", "天"],
+                      [`${state.entries.length}`, "累计杯数", "coffee", "杯"],
+                    ].map(([value, label, icon, unit]) => (
+                      <View key={label} style={s.statCard} accessible accessibilityLabel={`${label}，${value}${unit === "ml" ? "毫升" : unit}`}>
+                        <View style={s.rowBetween}>
+                          <Icon name={icon} size={20} color="#91a57b" />
+                          <Text style={s.statUnit}>{unit}</Text>
+                        </View>
+                        <Text style={s.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{value}</Text>
+                        <Text style={s.statLabel} numberOfLines={1}>{label}</Text>
                       </View>
                     ))}
                   </View>
-                  <View style={s.card}>
-                    <SectionTitle title="最近七天的水分" icon="bar-chart-2" />
-                    <WeekChart
-                      entries={state.entries}
-                      goal={state.goal}
-                      now={now}
-                    />
-                    <View style={s.chartLegend}>
-                      <View
-                        style={[s.legendDot, { backgroundColor: C.green }]}
-                      />
-                      <Text style={s.tiny}>今天</Text>
-                      <View
-                        style={[s.legendDot, { backgroundColor: "#c7d5b7" }]}
-                      />
-                      <Text style={s.tiny}>过去六天</Text>
-                    </View>
-                  </View>
+                  <WaterGarden entries={state.entries} now={now} />
                   <View style={s.card}>
                     <SectionTitle
                       title="饮水手记"
@@ -949,18 +975,15 @@ function AppContent() {
                       ? [...new Set(state.entries.map((e) => dayKey(e.at)))]
                           .sort()
                           .reverse()
-                          .map((date) => (
+                          .map((date) => {
+                            const entries = entriesForDay(state.entries, `${date}T12:00:00`);
+                            return (
                             <View key={date} style={{ marginTop: 20 }}>
                               <Text style={s.journalDate}>{date}</Text>
-                              {recordList(
-                                entriesForDay(
-                                  state.entries,
-                                  `${date}T12:00:00`,
-                                ),
-                                true,
-                              )}
+                              {recordList(entries, true)}
                             </View>
-                          ))
+                            );
+                          })
                       : recordList([])}
                   </View>
                 </View>
@@ -984,6 +1007,7 @@ function AppContent() {
                         paused={!!modal}
                         motion={motion}
                         accessory={state.accessory}
+                        beverage={state.beverage}
                         effect={state.effect}
                         celebration={celebration}
                         drinkRequest={drinkRun}
@@ -1005,6 +1029,39 @@ function AppContent() {
                       >
                         {speech}
                       </Text>
+                    </View>
+                  </View>
+                  <View style={s.card}>
+                    <SectionTitle title="陪卡皮喝点什么" icon="coffee" />
+                    <Text style={s.beverageHint}>挑一杯喜欢的，陪卡皮坐一会儿。</Text>
+                    <View style={s.effectOptions} accessibilityRole="radiogroup" accessibilityLabel="卡皮的饮料">
+                      {[
+                        ["tea", "茶", "矮口陶杯"],
+                        ["coffee", "咖啡", "圆柄马克杯"],
+                        ["juice", "果汁", "高身玻璃杯"],
+                      ].map(([id, title, cup]) => (
+                        <Pressable
+                          key={id}
+                          accessibilityRole="radio"
+                          accessibilityLabel={`${title}，${cup}`}
+                          accessibilityState={{ checked: state.beverage === id }}
+                          aria-checked={state.beverage === id}
+                          onPress={() => {
+                            setState((previous) => ({ ...previous, beverage: id }));
+                            setSpeech(`给卡皮准备了一杯${title}，一起慢慢享用吧。`);
+                          }}
+                          style={[s.effectOption, s.beverageOption, state.beverage === id && s.cupSelected]}
+                        >
+                          <CapyBeverageIcon beverage={id} />
+                          <Text style={s.effectLabel}>{title}</Text>
+                          <Text style={s.beverageCaption}>{cup}</Text>
+                          {state.beverage === id && (
+                            <View style={s.cupCheck}>
+                              <Icon name="check" size={9} color="#fff" />
+                            </View>
+                          )}
+                        </Pressable>
+                      ))}
                     </View>
                   </View>
                   <View style={s.card}>
@@ -1208,33 +1265,7 @@ function AppContent() {
             </ScrollView>
             {!desktop && navigation(true)}
             {toast && (
-              <View
-                style={[s.toast, !desktop && { bottom: 82 }]}
-                accessibilityLiveRegion="polite"
-              >
-                <Icon name="check-circle" color="#d4e4bd" size={16} />
-                <Text style={s.toastText}>{toast.message}</Text>
-                {toast.id && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="撤销刚刚的饮水记录"
-                    onPress={() => undo(toast.id)}
-                    style={s.toastUndo}
-                  >
-                    <Text style={s.toastUndoText}>撤销</Text>
-                  </Pressable>
-                )}
-                {!toast.id && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="关闭提示"
-                    onPress={() => setToast(null)}
-                    style={s.toastClose}
-                  >
-                    <Icon name="x" size={17} color="#d4e4bd" />
-                  </Pressable>
-                )}
-              </View>
+              <ToastMessage toast={toast} motion={motion} desktop={desktop} onUndo={undo} onDismiss={dismissToast} />
             )}
           </View>
         </View>

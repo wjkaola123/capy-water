@@ -5,7 +5,6 @@ import {
   Easing,
   Pressable,
   StyleSheet,
-  Text,
   View,
   Platform,
 } from "react-native";
@@ -30,8 +29,16 @@ const clamp = (value) => Math.max(0, Math.min(1, value));
 const ease = (value) => Easing.inOut(Easing.sin)(clamp(value));
 const mix = (from, to, amount) => from + (to - from) * amount;
 
-const CUP_REST_X = -116;
-const CUP_REST_Y = 56;
+// 杯底落在左前方池沿的同一接触点；杯口是举杯与倾斜的共同锚点。
+function cupGeometry(beverage) {
+  const scale = beverage === "coffee" ? 0.82 : beverage === "juice" ? 0.72 : 1;
+  const base = beverage === "coffee" ? 295 : beverage === "juice" ? 306 : 285;
+  return {
+    scale,
+    restX: 174 - (316 + (290 - 316) * scale),
+    restY: 336 - (251 + (base - 251) * scale),
+  };
+}
 const APPROACH_X = -86;
 const APPROACH_Y = 20;
 const WATER_PER_SIP = 0.25;
@@ -106,45 +113,56 @@ function hindFootPose(cycle, direction, offset) {
   };
 }
 
-function Cup({ x, y, tilt = 0, water }) {
+function Cup({ x = 0, y = 0, tilt = 0, water, beverage = "tea" }) {
+  const { scale } = cupGeometry(beverage);
   const waterClip = `cup-water-${React.useId().replace(/:/g, "")}`;
+  const coffee = beverage === "coffee";
+  const juice = beverage === "juice";
+  const bottom = juice ? 306 : coffee ? 294 : 283;
+  const vessel = juice
+    ? "M264 251 L271 302 Q290 309 309 302 L316 251Z"
+    : coffee
+      ? "M264 251 L266 283 Q267 295 290 295 Q313 295 314 283 L316 251Z"
+      : "M264 253 L272 281 Q292 289 310 281 L316 251Z";
+  const liquid = juice ? "#eea342" : coffee ? "#815d41" : "#8eb8a0";
   const cupAngle = 32 * tilt;
   const angle = (cupAngle * Math.PI) / 180;
-  const surfaceY = mix(283, 256, water);
+  const surfaceY = mix(bottom, 256, water);
   const leftWaterY = surfaceY + 26 * Math.tan(angle);
   const rightWaterY = surfaceY - 26 * Math.tan(angle);
   return (
     <G
-      transform={`translate(${x} ${y}) rotate(${cupAngle} 316 251)`}
+      transform={`translate(${x} ${y}) rotate(${cupAngle} 316 251) translate(316 251) scale(${scale}) translate(-316 -251)`}
     >
       <Defs>
         <ClipPath id={waterClip}>
-          <Path d="M266 252 L273 280 Q290 287 309 280 L314 252Z" />
+          <Path d={vessel} />
         </ClipPath>
       </Defs>
-      <Path
-        d={CUP_HANDLE}
+      {!juice && <Path
+        d={coffee ? "M265 259 C236 250 238 285 265 280" : CUP_HANDLE}
         fill="none"
         stroke="#8e9676"
         strokeWidth="6"
-      />
-      <Path
-        d={CUP_HANDLE}
+      />}
+      {!juice && <Path
+        d={coffee ? "M265 259 C236 250 238 285 265 280" : CUP_HANDLE}
         fill="none"
         stroke="#f7f4e4"
         strokeWidth="2.5"
-      />
+      />}
       <Path
-        d="M264 253 L272 281 Q292 289 310 281 L316 251Z"
-        fill="#f7f4e4"
+        d={vessel}
+        fill={juice ? "#fffdf1" : coffee ? "#d9b58b" : "#f7f4e4"}
+        fillOpacity={juice ? 0.4 : 1}
         stroke="#8e9676"
         strokeWidth="2.5"
       />
       {water > 0 && (
         <G clipPath={`url(#${waterClip})`}>
           <Path
-            d={`M263 ${leftWaterY} L317 ${rightWaterY} V289 H263Z`}
-            fill="#8eb8a0"
+            d={`M263 ${leftWaterY} L317 ${rightWaterY} V${bottom + 8} H263Z`}
+            fill={liquid}
             opacity=".78"
           />
           <Path
@@ -154,27 +172,49 @@ function Cup({ x, y, tilt = 0, water }) {
           />
         </G>
       )}
+      {coffee && (
+        <G>
+          <Path d="M266 276 Q290 282 314 276 L314 283 Q313 295 290 295 Q267 295 266 283Z" fill="#d9b58b" />
+          <Ellipse cx="291" cy="286" rx="5" ry="6" fill="#815d41" transform="rotate(25 291 286)" />
+          <Path d="M293 281 Q288 285 290 291" stroke="#d9b58b" strokeWidth="1.3" fill="none" />
+        </G>
+      )}
       <Ellipse
         cx="290"
         cy="251"
         rx="26"
         ry="7"
-        fill="#eee9d6"
+        fill="none"
         stroke="#8e9676"
         strokeWidth="2.5"
       />
       <Path
-        d="M270 260 L274 275"
+        d={juice ? "M271 260 L275 292" : coffee ? "M271 260 L272 280" : "M270 260 L274 275"}
         stroke="#fffdf3"
         strokeWidth="3"
         opacity=".7"
         strokeLinecap="round"
       />
+      {juice && (
+        <G>
+          <Path d="M302 249 A12 12 0 0 1 326 249Z" fill="#eea342" stroke="#f7c679" strokeWidth="2" />
+          <Path d="M314 249 L306 241 M314 249 V238 M314 249 L322 241" stroke="#fffdf1" strokeWidth="1.5" />
+        </G>
+      )}
     </G>
   );
 }
 
+export function CapyBeverageIcon({ beverage }) {
+  return (
+    <Svg width={66} height={58} viewBox="235 233 96 84" aria-hidden={true}>
+      <Cup beverage={beverage} water={0.8} />
+    </Svg>
+  );
+}
+
 function Capy({
+  beverage = "tea",
   accessory = "orange",
   blink = false,
   mini = false,
@@ -194,18 +234,29 @@ function Capy({
         mix(Number(value), FRONT_COORDS[coordinate++], turn).toFixed(2),
       )
     : PROFILE;
-  const cupX = mix(CUP_REST_X - APPROACH_X, -26 * sip, lift);
-  const cupY = mix(CUP_REST_Y - APPROACH_Y, 20 - 41 * sip, lift);
+  const { scale: cupScale, restX, restY } = cupGeometry(beverage);
+  const cupX = mix(restX - APPROACH_X, -26 * sip, lift);
+  const cupY = mix(restY - APPROACH_Y, 20 - 41 * sip, lift);
   const cupAngle = 32 * tilt;
   const angle = (cupAngle * Math.PI) / 180;
   // Hand and cup share the same transform, so the wrist stays attached while tilting.
   const handPoint = (x, y) => {
-    const dx = x - 316;
-    const dy = y - 251;
+    const dx = (x - 316) * cupScale;
+    const dy = (y - 251) * cupScale;
     return `${316 + cupX + dx * Math.cos(angle) - dy * Math.sin(angle)} ${251 + cupY + dx * Math.sin(angle) + dy * Math.cos(angle)}`;
   };
   const elbowY = 278 - 19 * sip;
-  const armOutline = `M231 245
+  const armOutline = beverage === "juice"
+    ? `M231 245
+    C224 259 230 ${elbowY} ${handPoint(267, 288)}
+    Q${handPoint(276, 295)} ${handPoint(284, 289)}
+    Q${handPoint(291, 285)} ${handPoint(287, 280)}
+    Q${handPoint(285, 277)} ${handPoint(279, 280)}
+    L${handPoint(273, 281)}
+    Q${handPoint(280, 269)} ${handPoint(274, 267)}
+    Q${handPoint(268, 266)} ${handPoint(264, 277)}
+    C237 ${elbowY - 8} 246 258 248 250`
+    : `M231 245
     C225 257 226 ${elbowY} ${handPoint(245, 268)}
     C${handPoint(247, 274)} ${handPoint(257, 276)} ${handPoint(262, 270)}
     Q${handPoint(267, 264)} ${handPoint(262, 261)}
@@ -229,14 +280,14 @@ function Capy({
         <G stroke="#815d41" strokeWidth="2.5" strokeLinecap="round">
           <G transform={`translate(${farFoot.x * footBlend} ${farFoot.y * footBlend})`}>
             <Path
-              d="M336 266 Q350 267 350 283 C350 291 365 290 365 298 Q363 304 346 303 Q330 302 327 292 L325 279Z"
+              d="M330 276 Q344 273 350 283 L351 291 Q366 292 365 299 C361 305 340 305 334 300 Q328 295 328 286Z"
               fill="#b58156"
             />
             <Path d="M351 297 Q355 298 355 302" fill="none" />
           </G>
           <G transform={`translate(${nearFoot.x * footBlend} ${nearFoot.y * footBlend})`}>
             <Path
-              d="M251 270 Q268 266 279 278 L275 291 C276 296 290 295 291 302 Q290 310 271 309 Q252 308 249 299 Q243 288 251 270Z"
+              d="M250 279 Q263 274 275 282 L274 294 Q291 294 291 301 C288 308 263 308 255 302 Q249 297 249 288Z"
               fill="#bb8b62"
             />
             <Path d="M275 302 Q279 303 279 308" fill="none" />
@@ -244,20 +295,20 @@ function Capy({
         </G>
       )}
       <Path
-        d="M222 259 C213 225 230 189 257 174 C284 159 344 170 361 203 C376 229 375 259 358 274 C330 290 248 290 222 259Z"
+        d="M218 257 C212 230 225 200 247 189 C272 176 321 178 346 194 C367 208 378 242 368 266 C359 289 335 295 295 295 C256 295 227 285 218 257Z"
         fill="#bb8b62"
         stroke="#815d41"
         strokeWidth="3"
       />
-      <Ellipse cx="296" cy="246" rx="45" ry="35" fill="#cda278" />
+      <Ellipse cx="293" cy="265" rx="49" ry="23" fill="#cda278" opacity=".65" />
       <Path
-        d="M221 172 C205 161 202 141 210 132 C220 121 235 131 243 149 Q240 165 221 172Z M323 150 C324 134 332 124 341 125 C353 125 360 139 354 152 Q351 161 342 166 Q327 165 323 150Z"
+        d="M222 167 C209 159 207 143 214 137 C223 130 234 138 240 150 Q237 162 222 167Z M325 151 C326 139 333 131 341 133 C351 134 355 144 350 153 Q347 160 340 163 Q329 162 325 151Z"
         fill="#bc8c61"
         stroke="#815d41"
         strokeWidth="3"
       />
       <Path
-        d="M219 151 C213 140 221 135 229 144 Q234 149 232 155 Q224 156 219 151Z M332 149 C334 139 340 134 345 139 Q350 143 346 151 Q340 157 332 149Z"
+        d="M219 151 C215 143 222 139 228 146 Q231 150 229 154 Q223 155 219 151Z M333 149 C334 142 340 138 344 142 Q347 146 343 152 Q338 155 333 149Z"
         fill="#a57555"
       />
       <Path d={outline} fill="#cca074" stroke="#815d41" strokeWidth="3" />
@@ -381,13 +432,6 @@ function Capy({
         fill="none"
         opacity={1 - turn}
       />
-      <Path
-        d="M308 260 Q321 269 334 259"
-        stroke="#966e4d"
-        strokeWidth="3"
-        strokeLinecap="round"
-        fill="none"
-      />
       {accessory === "orange" && (
         <G transform="rotate(-9 285 130)">
           <Ellipse
@@ -457,17 +501,17 @@ function Capy({
       {!mini && (
         <>
           <Path
-            d="M353 243 C363 253 361 267 352 275 C346 280 336 281 332 277 C327 272 334 267 339 263 Q346 255 343 249"
+            d="M348 245 C356 253 355 266 350 273 Q345 280 338 277 C332 274 337 267 339 261 L340 251"
             fill="#bb8b62"
             stroke="#815d41"
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          {holdingCup && <Cup x={cupX} y={cupY} tilt={tilt} water={water} />}
+          {holdingCup && <Cup x={cupX} y={cupY} tilt={tilt} water={water} beverage={beverage} />}
           {!holdingCup && (
             <Path
-              d="M232 244 C225 254 228 268 236 275 Q246 282 251 276 Q256 272 248 265 Q241 259 244 250"
+              d="M233 246 C227 255 229 270 235 278 Q241 284 248 279 C253 275 247 269 246 263 L245 252"
               fill="#bb8b62"
               stroke="#815d41"
               strokeWidth="2.5"
@@ -486,10 +530,12 @@ function Capy({
                 strokeLinejoin="round"
               />
               <G
-                transform={`translate(${cupX} ${cupY}) rotate(${cupAngle} 316 251)`}
+                transform={`translate(${cupX} ${cupY}) rotate(${cupAngle} 316 251) translate(316 251) scale(${cupScale}) translate(-316 -251)`}
               >
                 <Path
-                  d="M249 265 Q253 269 257 268 M256 263 L259 265"
+                  d={beverage === "juice"
+                    ? "M274 284 Q280 285 286 282 M274 288 Q279 289 283 286"
+                    : "M249 265 Q253 269 257 268 M256 263 L259 265"}
                   fill="none"
                   stroke="#956b49"
                   strokeWidth="1.4"
@@ -523,6 +569,7 @@ export function CapyAvatar({ size = 54, accessory = "orange" }) {
 }
 
 export default function CapyScene({
+  beverage = "tea",
   motion = true,
   celebration = 0,
   drinkRequest = 0,
@@ -534,6 +581,7 @@ export default function CapyScene({
   growth = 1,
   paused = false,
 }) {
+  const { restX, restY } = cupGeometry(beverage);
   const frame = wide ? "-100 0 800 440" : "0 -80 600 520";
   const poolClip = `pool-surface-${React.useId().replace(/:/g, "")}`;
   const bob = useRef(new Animated.Value(0)).current;
@@ -549,6 +597,10 @@ export default function CapyScene({
   const [previewRun, setPreviewRun] = React.useState(0);
   const consumedPreview = useRef(0);
   const consumedDrink = useRef(drinkRequest);
+  useEffect(() => {
+    remainingWater.current = 1;
+    setPose(null);
+  }, [beverage]);
   const [active, setActive] = React.useState(
     AppState.currentState === "active",
   );
@@ -647,7 +699,7 @@ export default function CapyScene({
       clearTimeout(timer);
       cancelAnimationFrame(frameId);
     };
-  }, [motion, paused, active, previewRun]);
+  }, [motion, paused, active, previewRun, beverage]);
   useEffect(() => {
     if (!motion) {
       bob.setValue(0);
@@ -918,18 +970,24 @@ export default function CapyScene({
         ]}
       >
         <G transform={wide ? "translate(0 55)" : undefined}>
-          <Path
-            d="M390 18 C378 18 376 4 387 -2 C390 -18 411 -24 422 -12 C430 -34 463 -31 470 -9 C490 -17 505 -2 501 10 C516 17 510 29 496 29 H397 Q386 29 390 18Z"
-            fill="#fffdf1"
-          />
-          <Path
-            d="M466 42 Q488 38 502 42"
-            stroke="#fffdf1"
-            strokeWidth="4"
-            strokeLinecap="round"
-            fill="none"
-            opacity=".5"
-          />
+          {[
+            // 舒展的低云：左侧轻柔，右侧逐渐收窄。
+            [245, -32, 0.66,
+              "M-57 14 C-68 11 -64 -2 -52 -3 C-52 -18 -33 -23 -22 -13 C-15 -30 10 -28 17 -10 C30 -17 45 -10 46 1 C64 -1 73 11 62 18 C42 24 20 21 0 23 C-24 24 -48 24 -57 14Z"],
+            // 圆润的积云：主峰偏左，两侧云团高低不同。
+            [375, 4, 0.7,
+              "M-54 20 C-69 17 -66 0 -51 -3 C-58 -18 -39 -32 -25 -24 C-22 -44 9 -45 17 -23 C32 -29 48 -17 46 -4 C66 -6 76 11 62 21 C44 29 25 24 5 27 C-18 28 -40 27 -54 20Z"],
+            // 轻薄的层云：宽而扁，边缘更平缓。
+            [505, -24, 0.68,
+              "M-59 14 C-72 10 -65 -2 -51 -1 C-44 -14 -27 -15 -15 -8 C-5 -24 19 -23 29 -9 C44 -13 57 -6 57 4 C76 5 78 17 62 21 C39 23 21 20 0 23 C-23 25 -48 23 -59 14Z"],
+          ].map(([x, y, scale, outline]) => (
+            <G key={x} transform={`translate(${x} ${y}) scale(${scale})`}>
+              <Path
+                d={outline}
+                fill="#fffdf1"
+              />
+            </G>
+          ))}
         </G>
       </SceneryLayer>
       <SceneryLayer
@@ -1049,6 +1107,7 @@ export default function CapyScene({
         <Svg width="100%" height="100%" viewBox={frame}>
           <G transform={`translate(${travelX} ${travelY + weightShift}) rotate(${lean} 292 288)`}>
             <Capy
+              beverage={beverage}
               accessory={accessory}
               blink={!walking && (pose?.eyesClosed ?? (motion && blink))}
               turn={pose?.turn}
@@ -1135,7 +1194,8 @@ export default function CapyScene({
       {!pose?.holdingCup && (
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           <Svg width="100%" height="100%" viewBox={frame}>
-            <Cup x={CUP_REST_X} y={CUP_REST_Y} water={pose?.water ?? remainingWater.current} />
+            <Ellipse cx="174" cy="337" rx="19" ry="3" fill="#8e9676" opacity=".2" />
+            <Cup x={restX} y={restY} water={pose?.water ?? remainingWater.current} beverage={beverage} />
           </Svg>
         </View>
       )}
@@ -1229,43 +1289,9 @@ export default function CapyScene({
           </Svg>
         </Animated.View>
       )}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={
-          remainingWater.current === 0 && !pose
-            ? "添水并预览喝水动画"
-            : "预览喝水动画"
-        }
-        disabled={!!pose || paused}
-        onPress={(event) => {
-          event.stopPropagation();
-          setPreviewRun((value) => value + 1);
-        }}
-        style={sceneStyles.previewButton}
-      >
-        <Text style={sceneStyles.previewText}>
-          {pose
-            ? "卡皮在喝水…"
-            : remainingWater.current === 0
-              ? "▶ 添水再喝"
-              : "▶ 看卡皮喝水"}
-        </Text>
-      </Pressable>
     </Pressable>
   );
 }
 const sceneStyles = StyleSheet.create({
-  previewButton: {
-    position: "absolute",
-    alignSelf: "center",
-    bottom: 6,
-    minHeight: 36,
-    justifyContent: "center",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#fffdf4",
-  },
-  previewText: { fontSize: 11, color: "#476343", fontWeight: "600" },
   stage: { width: "100%", aspectRatio: 600 / 520 },
 });
