@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { turtleMotion, turtleFootPose, scheduleTurtleTrips, createTurtleTrip } from "./turtleMotion";
 import {
   Animated,
   AppState,
@@ -47,6 +48,9 @@ const BIRD_FLAP_PHASES = Array.from({ length: 37 }, (_, index) => index / 36);
 const BIRD_WING_SCALE = BIRD_FLAP_PHASES.map((_, index) =>
   index % 2 === 0 ? 1 : 0.35,
 );
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const TURTLE_ROUTE_PHASES = Array.from({ length: 193 }, (_, index) => index / 192);
+const TURTLE_ROUTE = TURTLE_ROUTE_PHASES.map(turtleMotion);
 
 function EffectMark({ effect }) {
   if (effect === "stars") {
@@ -86,7 +90,7 @@ export function CapyEffectIcon({ effect }) {
   );
 }
 
-function SceneryLayer({ frame, wide, origin, opacity, transform, children }) {
+function SceneryLayer({ frame, wide, origin, opacity, transform, children, overlay }) {
   const [x, y] = origin;
   const originX = wide ? (x + 100) / 8 : x / 6;
   const originY = wide ? (y / 440) * 100 : ((y + 80) / 520) * 100;
@@ -99,7 +103,320 @@ function SceneryLayer({ frame, wide, origin, opacity, transform, children }) {
       ]}
     >
       <Svg width="100%" height="100%" viewBox={frame}>{children}</Svg>
+      {overlay}
     </Animated.View>
+  );
+}
+
+function LeafLadybug({ frame, wide, motion, paused, active }) {
+  const crawl = useRef(new Animated.Value(0)).current;
+  const [step, setStep] = React.useState(0);
+  useEffect(() => {
+    if (!motion || paused || !active) {
+      crawl.setValue(0);
+      setStep(0);
+      return;
+    }
+    const animation = Animated.loop(Animated.timing(crawl, {
+      toValue: 1,
+      duration: 36000,
+      easing: Easing.linear,
+      useNativeDriver: Platform.OS !== "web",
+      isInteraction: false,
+    }));
+    animation.start();
+    // 低频更新 SVG 足部，位移与转身仍由原生动画驱动。
+    const feet = setInterval(() => setStep((value) => (value + 1) % 300), 120);
+    return () => {
+      animation.stop();
+      clearInterval(feet);
+    };
+  }, [motion, paused, active, crawl]);
+  const phases = [0, .45, .5, .95, 1];
+  // 交替三足步态：左前、右中、左后与另一组三足错半周期。
+  const stride = Math.sin(step * Math.PI / 5);
+  const legs = [-1, 1].flatMap((side) => [-3.5, 0, 3.5].map((y, row) => {
+    const swing = stride * (row % 2 === 0 ? side : -side) * 2.6;
+    return `M${side * 4} ${y} L${side * 6.5} ${y + swing * .5} L${side * 9} ${y + swing + 1}`;
+  })).join(" ");
+  return (
+    <SceneryLayer frame={frame} wide={wide} origin={[548, 223]} transform={[
+      { translateX: crawl.interpolate({ inputRange: phases, outputRange: [0, 4, 4, 0, 0] }) },
+      { translateY: crawl.interpolate({ inputRange: phases, outputRange: [0, -6, -6, 0, 0] }) },
+      { rotate: crawl.interpolate({ inputRange: phases, outputRange: ["35deg", "35deg", "215deg", "215deg", "395deg"] }) },
+    ]}>
+      <G transform="translate(548 223) scale(.7)">
+        <Ellipse cx="0" cy="2" rx="8" ry="9" fill="#54764f" opacity=".2" />
+        <Path d={legs} stroke="#815d41" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+        <G transform={`translate(0 ${Math.abs(stride) * -.45})`}>
+        <Path d="M-2 -8 L-4 -11 M2 -8 L4 -11" stroke="#815d41" strokeWidth="1.2" strokeLinecap="round" />
+        <Circle cy="-6" r="3.5" fill="#815d41" />
+        <Ellipse rx="6.5" ry="7.5" fill="#d99484" />
+        <Path d="M0 -5 V7" stroke="#815d41" strokeWidth=".8" fill="none" />
+        {/* 中间一枚、左右鞘翅各三枚，合计七颗斑点。 */}
+        {[[0, -5], [-3, -2], [3, -2], [-3.5, 1.5], [3.5, 1.5], [-2.5, 5], [2.5, 5]].map(([cx, cy], index) => (
+          <Circle key={index} cx={cx} cy={cy} r="1.15" fill="#815d41" />
+        ))}
+        <Ellipse cx="-2.5" cy="-3.8" rx="1" ry="1.6" fill="#fffdf1" opacity=".55" />
+        </G>
+      </G>
+    </SceneryLayer>
+  );
+}
+
+function TurtleBody({ route, feet, response, limbs, enabled, walking }) {
+  const values = useRef({ route: 0, feet: 0, response: 0, limbs: 0 });
+  const [pose, setPose] = React.useState(values.current);
+  useEffect(() => {
+    const subscriptions = [route, feet, response, limbs].map((value, index) => {
+      const key = ["route", "feet", "response", "limbs"][index];
+      return value.addListener(({ value: next }) => { values.current[key] = next; });
+    });
+    if (!enabled) setPose({ route: 0, feet: 0, response: 0, limbs: 0 });
+    // 只对矢量姿态做低频重绘，整段爬行的位置继续由 native driver 驱动。
+    const timer = enabled ? setInterval(() => setPose({ ...values.current }), 50) : null;
+    return () => {
+      [route, feet, response, limbs].forEach((value, index) => value.removeListener(subscriptions[index]));
+      if (timer) clearInterval(timer);
+    };
+  }, [route, feet, response, limbs, enabled]);
+  const { angle: bodyAngle, turning } = turtleMotion(pose.route);
+  const headAngle = bodyAngle + (turning ? .08 * Math.abs(Math.sin(bodyAngle)) : 0) + .12 * Math.sin(pose.response * Math.PI * 4);
+  const direction = Math.cos(bodyAngle);
+  const front = Math.abs(Math.sin(bodyAngle));
+  const headFront = Math.abs(Math.sin(headAngle));
+  const center = 43.5;
+  const shellWidth = 23 - 3 * front;
+  const headX = center + 25 * (1 - pose.response) * Math.cos(headAngle);
+  const headY = 35 + 9 * (1 - pose.response) * Math.sin(headAngle) - 4 * pose.response;
+  const tailExtension = 1 - .8 * pose.limbs;
+  const tailSway = walking ? Math.sin(pose.feet * Math.PI * 2) * .3 : 0;
+  const tailPoint = (back, lift) => `${center - back * tailExtension * direction} ${36 - back * tailExtension * .25 * Math.sin(bodyAngle) + lift * tailExtension}`;
+  const drawFeet = (side) => [-1, 1].map((end) => {
+    const foot = walking ? turtleFootPose(pose.feet, side, end, turning) : { offset: 0, lift: 0 };
+    const x = center + end * (side === -1 ? 24 : 17) * direction + side * 12 * front;
+    const y = (side === -1 ? 37 : 43) + end * 3 * Math.sin(bodyAngle);
+    const toeX = x + foot.offset * direction;
+    const toeY = y + 7 - foot.lift;
+    const scale = 1 - .75 * pose.limbs;
+    return <G key={`${side}-${end}`} opacity={1 - pose.limbs} transform={`translate(${center} 33) scale(${scale}) translate(${-center} -33)`}>
+      <Path d={`M${x - 3} ${y - 3} Q${toeX - 9} ${toeY + 1} ${toeX} ${toeY} Q${toeX + 7} ${toeY} ${x + 5} ${y - 2}Z`} fill={side === -1 ? "#789b70" : "#8fab7d"} stroke="#54764f" strokeWidth=".8" />
+      <Path d={`M${toeX - 3} ${toeY - 2} L${toeX - 3} ${toeY} M${toeX} ${toeY - 2} V${toeY}`} fill="none" stroke="#54764f" strokeWidth=".8" strokeLinecap="round" />
+    </G>;
+  });
+  const face = Math.max(0, 1 + Math.min(0, Math.sin(headAngle)) * 2);
+  const head = <G opacity={1 - pose.response} transform={`translate(${headX} ${headY}) scale(${1 - .7 * pose.response}) translate(${-headX} ${-headY})`}>
+    <Ellipse cx={headX} cy={headY} rx={13 - 3 * headFront} ry="10" fill="#8fab7d" />
+    <G opacity={face}>
+      <Circle cx={headX + 6 * Math.cos(headAngle) - 4 * headFront} cy={headY - 3} r="1.8" fill="#815d41" />
+      <Circle cx={headX + 6 * Math.cos(headAngle) + 4 * headFront} cy={headY - 3} r="1.8" fill="#815d41" opacity={headFront} />
+      <Path d={`M${headX - 3 + 3 * Math.cos(headAngle)} ${headY + 4} Q${headX + 3 * Math.cos(headAngle)} ${headY + 7} ${headX + 3 + 3 * Math.cos(headAngle)} ${headY + 4}`} stroke="#54764f" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+    </G>
+  </G>;
+  return (
+    <Svg width="100%" height="100%" viewBox="0 0 87 56" style={StyleSheet.absoluteFill} accessible={false}>
+      <G>
+        <Path
+          d={`M${tailPoint(19, 1)} Q${tailPoint(28, 5)} ${tailPoint(35, 6 + tailSway)} Q${tailPoint(28, 9)} ${tailPoint(18, 6)}Z`}
+          fill="#789b70" fillOpacity={1} stroke="#54764f" strokeOpacity={1} strokeWidth="1.5" strokeLinejoin="round"
+        />
+        <Path d={`M${tailPoint(22, 4)} Q${tailPoint(27, 6)} ${tailPoint(31, 6.5 + tailSway * .5)}`} fill="none" stroke="#a7c598" strokeWidth="1" strokeLinecap="round" />
+      </G>
+      {head}
+      {drawFeet(-1)}
+      <Path d={`M${center - shellWidth} 41 Q${center - shellWidth - 2} ${17 - front * 3} ${center} ${17 - front * 3} Q${center + shellWidth} ${17 - front * 3} ${center + shellWidth + 2} 41 Q${center} ${49 + front} ${center - shellWidth} 41Z`} fill="#789b70" />
+      <Path d={`M${center - shellWidth + 2} 39 Q${center} 44 ${center + shellWidth} 39 M${center} 19 L${center - 6 * direction} 30 L${center} 41 M${center - 6 * direction} 30 L${center - shellWidth + 3} 28 M${center - 6 * direction} 30 L${center + 9 * direction} 29 L${center + 17 * direction} 21 M${center + 9 * direction} 29 L${center + 14 * direction} 41`} fill="none" stroke="#a7c598" strokeWidth="1.6" strokeLinecap="round" />
+      {drawFeet(1)}
+      <G transform={`translate(${center - 4 * direction} ${17 - front * 3}) rotate(${-10 * Math.sin(bodyAngle)})`}>
+        <Path d="M0 1 Q-2 -12 14 -10 Q17 1 0 1Z" fill="#8fab7d" />
+        <Path d="M-1 2 L10 -7" fill="none" stroke="#54764f" strokeWidth="1.2" strokeLinecap="round" />
+      </G>
+      <G opacity={Math.max(0, Math.min(1, Math.sin(headAngle) * 4))}>{head}</G>
+    </Svg>
+  );
+}
+
+// 与场景使用同一坐标系，宽屏时也留在池沿下方；互动不触发摸头。
+function PondNeighbor({ kind, wide, motion, paused, active }) {
+  const idle = useRef(new Animated.Value(0)).current;
+  const feet = useRef(new Animated.Value(0)).current;
+  const [layoutWidth, setLayoutWidth] = React.useState(0);
+  const [walking, setWalking] = React.useState(false);
+  const response = useRef(new Animated.Value(0)).current;
+  const limbs = useRef(new Animated.Value(0)).current;
+  const journey = useRef(null);
+  const sheltered = useRef(false);
+  const responseRun = useRef(null);
+  const turtle = kind === "turtle";
+  const peck = kind === "peck";
+  const x = turtle ? 111 : peck ? 434 : 477;
+  const y = turtle ? 367 : peck ? 372 : 365;
+  const width = turtle ? 87 : 47;
+  const height = turtle ? 56 : 55;
+  const enabled = motion && !paused && active;
+  useEffect(() => {
+    sheltered.current = false;
+    setWalking(false);
+    if (!enabled) {
+      idle.setValue(0);
+      responseRun.current?.stop();
+      response.setValue(0);
+      limbs.setValue(0);
+      return;
+    }
+    if (turtle) {
+      idle.setValue(0);
+      const cancel = scheduleTurtleTrips({ startTrip: (done) => {
+        idle.setValue(0);
+        const trip = createTurtleTrip({
+          initiallyHeld: sheltered.current,
+          onWalking: setWalking,
+          stop: (save) => idle.stopAnimation(save),
+          move: (from, duration, finished) => {
+            idle.setValue(from);
+            Animated.timing(idle, { toValue: 1, duration, easing: Easing.linear, useNativeDriver: Platform.OS !== "web", isInteraction: false }).start(({ finished: complete }) => finished(complete));
+          },
+          onComplete: (finished) => {
+            journey.current = null;
+            idle.setValue(0);
+            done(finished);
+          },
+        });
+        journey.current = trip;
+        return () => { trip.dispose(); journey.current = null; };
+      } });
+      return () => {
+        cancel();
+        responseRun.current?.stop();
+      };
+    }
+    const animation = Animated.loop(Animated.sequence([
+      Animated.delay(peck ? 2600 : 10500),
+      Animated.timing(idle, {
+        toValue: 1,
+        duration: peck ? 2200 : 1600,
+        easing: Easing.linear,
+        useNativeDriver: Platform.OS !== "web",
+        isInteraction: false,
+      }),
+      Animated.timing(idle, { toValue: 0, duration: 0, useNativeDriver: Platform.OS !== "web", isInteraction: false }),
+    ]));
+    animation.start();
+    return () => {
+      animation.stop();
+      responseRun.current?.stop();
+    };
+  }, [enabled, turtle, peck, idle, response, limbs]);
+  useEffect(() => {
+    if (!enabled || !turtle || !walking) {
+      feet.setValue(0);
+      return;
+    }
+    const gait = Animated.loop(Animated.timing(feet, {
+      toValue: 1,
+      duration: 2200,
+      easing: Easing.linear,
+      useNativeDriver: Platform.OS !== "web",
+      isInteraction: false,
+    }));
+    gait.start();
+    return () => gait.stop();
+  }, [enabled, turtle, feet, walking]);
+  // 以实际显示宽度换算场景坐标，终点落在池前中央 x=300。
+  const sceneScale = layoutWidth / 87;
+  const react = (event) => {
+    event.stopPropagation();
+    if (!enabled) return;
+    responseRun.current?.stop();
+    if (turtle) {
+      sheltered.current = true;
+      journey.current?.pause();
+      const retract = (value, toValue, duration) => Animated.timing(value, { toValue, duration, useNativeDriver: Platform.OS !== "web", isInteraction: false });
+      responseRun.current = Animated.sequence([
+        Animated.parallel([retract(response, 1, 240), retract(limbs, 1, 240)]),
+        Animated.delay(1800),
+        retract(response, .22, 600),
+        Animated.delay(900),
+        retract(response, .12, 500),
+        Animated.parallel([retract(response, 0, 600), retract(limbs, 0, 750)]),
+      ]);
+      responseRun.current.start(({ finished }) => {
+        if (!finished) return;
+        sheltered.current = false;
+        journey.current?.resume();
+      });
+      return;
+    }
+    response.setValue(0);
+    responseRun.current = Animated.sequence([
+      Animated.timing(response, { toValue: 1, duration: 220, useNativeDriver: Platform.OS !== "web" }),
+      Animated.delay(450),
+      Animated.timing(response, { toValue: 0, duration: 400, useNativeDriver: Platform.OS !== "web" }),
+    ]);
+    responseRun.current.start();
+  };
+  const peckPhases = [0, .12, .28, .34, .5, .62, .76, .82, 1];
+  const headTurn = Animated.add(
+    idle.interpolate({
+      inputRange: peck ? peckPhases : [0, .2, .4, .6, .8, 1],
+      // 面向左侧，以颈部为轴逆时针低头，让喙接近脚边的地面。
+      outputRange: peck ? [0, -12, -58, -58, 0, -12, -58, -58, 0] : [0, 0, -12, 0, 0, 0],
+    }),
+    response.interpolate({ inputRange: [0, 1], outputRange: [0, -18] }),
+  ).interpolate({ inputRange: [-90, 30], outputRange: ["-90deg", "30deg"] });
+  return (
+    <AnimatedPressable
+      accessibilityRole="button"
+      accessibilityLabel={turtle ? "看看池边的小乌龟" : peck ? "看看啄草籽的小麻雀" : "看看歪头的小麻雀"}
+      onPress={react}
+      onLayout={turtle ? (event) => setLayoutWidth(event.nativeEvent.layout.width) : undefined}
+      style={{
+        position: "absolute",
+        left: `${((x + (wide ? 100 : 0)) / (wide ? 800 : 600)) * 100}%`,
+        top: `${((y + (wide ? 0 : 80)) / (wide ? 440 : 520)) * 100}%`,
+        width: `${(width / (wide ? 800 : 600)) * 100}%`,
+        height: `${(height / (wide ? 440 : 520)) * 100}%`,
+        transform: [
+          { translateX: turtle ? idle.interpolate({ inputRange: TURTLE_ROUTE_PHASES, outputRange: TURTLE_ROUTE.map((point) => point.x * sceneScale) }) : 0 },
+          { translateY: turtle ? idle.interpolate({ inputRange: TURTLE_ROUTE_PHASES, outputRange: TURTLE_ROUTE.map((point) => point.y * sceneScale) }) : 0 },
+        ],
+      }}
+    >
+      <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} accessible={false}>
+        <Ellipse cx={turtle ? 40 : 23} cy={height - 6} rx={turtle ? 32 : 16} ry="3" fill="#a6b895" opacity=".55" />
+      </Svg>
+      {turtle ? <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <TurtleBody route={idle} feet={feet} response={response} limbs={limbs} enabled={enabled} walking={walking} />
+      </View> : <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, {
+        transform: [
+          { translateY: peck ? 0 : idle.interpolate({ inputRange: [0, .2, .35, .5, .65, 1], outputRange: [0, 0, -5, 0, -3, 0] }) },
+        ],
+      }]}>
+        <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} accessible={false}>
+            <Path d="M19 43 L18 49 M28 43 L29 49 M15 49 H21 M26 49 H32" fill="none" stroke="#815d41" strokeWidth="1.5" strokeLinecap="round" />
+            <Path d="M32 31 L44 23 L40 37 L30 39Z" fill="#815d41" />
+            <Ellipse cx="23" cy="33" rx="15" ry="13" fill="#cca074" />
+            <Ellipse cx="19" cy="36" rx="10" ry="9" fill="#e3dec5" />
+            <Path d="M25 28 Q39 29 33 39 Q26 40 23 34" fill="#815d41" />
+        </Svg>
+        <Animated.View style={[StyleSheet.absoluteFill, {
+          transformOrigin: peck ? "49% 60%" : "40% 50%",
+          transform: [
+            { translateY: peck ? idle.interpolate({ inputRange: peckPhases, outputRange: [0, .3, 1.5, 1.5, 0, .3, 1.5, 1.5, 0] }) : 0 },
+            { rotate: headTurn },
+          ],
+        }]}>
+          <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} accessible={false}>
+              <Circle cx="17" cy="21" r="11" fill="#cca074" />
+              <Path d="M7 19 Q7 8 17 10 Q26 10 28 20 Q17 16 7 19Z" fill="#815d41" />
+              <Ellipse cx="13" cy="25" rx="7" ry="5" fill="#e3dec5" />
+              <Path d="M7 22 L1 25 L8 27Z" fill="#edab4a" />
+              <Circle cx="12" cy="20" r="1.6" fill="#815d41" />
+              <Circle cx="17" cy="26" r="1.8" fill="#e7b9ae" />
+          </Svg>
+        </Animated.View>
+      </Animated.View>}
+    </AnimatedPressable>
   );
 }
 
@@ -816,12 +1133,7 @@ export default function CapyScene({
   const weightShift = 3 * gait.blend * Math.sin(4 * Math.PI * gait.cycle);
   const lean = 2.5 * gait.direction * gait.blend;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="摸摸卡皮的头"
-      onPress={onPet}
-      style={[sceneStyles.stage, wide && { aspectRatio: 800 / 440 }]}
-    >
+    <View style={[sceneStyles.stage, wide && { aspectRatio: 800 / 440 }]}>
       <Svg
         width="100%"
         height="100%"
@@ -1008,6 +1320,7 @@ export default function CapyScene({
         frame={frame}
         wide={wide}
         origin={[523, 255]}
+        overlay={<LeafLadybug frame={frame} wide={wide} motion={motion} paused={paused} active={active} />}
         transform={[
           { rotate: breeze.interpolate({
             inputRange: [0, 0.28, 0.56, 0.78, 1],
@@ -1229,6 +1542,15 @@ export default function CapyScene({
           />
         </Svg>
       </Animated.View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="摸摸卡皮的头"
+        onPress={onPet}
+        style={StyleSheet.absoluteFill}
+      />
+      {["turtle", "peck", "hop"].map((kind) => (
+        <PondNeighbor key={kind} kind={kind} wide={wide} motion={motion} paused={paused} active={active} />
+      ))}
       {!!(celebration || sipCelebration) && motion && (
         <Animated.View
           pointerEvents="none"
@@ -1289,7 +1611,7 @@ export default function CapyScene({
           </Svg>
         </Animated.View>
       )}
-    </Pressable>
+    </View>
   );
 }
 const sceneStyles = StyleSheet.create({
