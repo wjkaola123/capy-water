@@ -156,7 +156,8 @@ export const s = StyleSheet.create({
   hero: {
     height: 385,
     borderRadius: 24,
-    overflow: "hidden",
+    // hidden 仍可被焦点自动滚动；Web 场景只裁剪，不建立滚动容器。
+    overflow: Platform.OS === "web" ? "clip" : "hidden",
     backgroundColor: "#e8eeda",
   },
   heroScene: { position: "absolute", bottom: 0, left: 0, right: 0 },
@@ -438,7 +439,7 @@ export const s = StyleSheet.create({
     backgroundColor: "#eaf0de",
     borderRadius: 25,
     padding: 27,
-    overflow: "hidden",
+    overflow: Platform.OS === "web" ? "clip" : "hidden",
   },
   gardenHeading: { fontSize: 21, fontWeight: "700", color: "#5b764d" },
   gardenBadge: {
