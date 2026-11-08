@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { LADYBUG_CYCLE_MS, LADYBUG_ROUTE } from "./ladybugMotion";
 import { turtleMotion, turtleFootPose, scheduleTurtleTrips, createTurtleTrip } from "./turtleMotion";
 import {
   Animated,
@@ -51,6 +52,7 @@ const BIRD_WING_SCALE = BIRD_FLAP_PHASES.map((_, index) =>
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const TURTLE_ROUTE_PHASES = Array.from({ length: 193 }, (_, index) => index / 192);
 const TURTLE_ROUTE = TURTLE_ROUTE_PHASES.map(turtleMotion);
+const LADYBUG_PHASES = LADYBUG_ROUTE.map(({ phase }) => phase);
 
 function EffectMark({ effect }) {
   if (effect === "stars") {
@@ -119,7 +121,7 @@ function LeafLadybug({ frame, wide, motion, paused, active }) {
     }
     const animation = Animated.loop(Animated.timing(crawl, {
       toValue: 1,
-      duration: 36000,
+      duration: LADYBUG_CYCLE_MS,
       easing: Easing.linear,
       useNativeDriver: Platform.OS !== "web",
       isInteraction: false,
@@ -132,7 +134,6 @@ function LeafLadybug({ frame, wide, motion, paused, active }) {
       clearInterval(feet);
     };
   }, [motion, paused, active, crawl]);
-  const phases = [0, .45, .5, .95, 1];
   // 交替三足步态：左前、右中、左后与另一组三足错半周期。
   const stride = Math.sin(step * Math.PI / 5);
   const legs = [-1, 1].flatMap((side) => [-3.5, 0, 3.5].map((y, row) => {
@@ -141,9 +142,9 @@ function LeafLadybug({ frame, wide, motion, paused, active }) {
   })).join(" ");
   return (
     <SceneryLayer frame={frame} wide={wide} origin={[548, 223]} transform={[
-      { translateX: crawl.interpolate({ inputRange: phases, outputRange: [0, 4, 4, 0, 0] }) },
-      { translateY: crawl.interpolate({ inputRange: phases, outputRange: [0, -6, -6, 0, 0] }) },
-      { rotate: crawl.interpolate({ inputRange: phases, outputRange: ["35deg", "35deg", "215deg", "215deg", "395deg"] }) },
+      { translateX: crawl.interpolate({ inputRange: LADYBUG_PHASES, outputRange: LADYBUG_ROUTE.map(({ x }) => x) }) },
+      { translateY: crawl.interpolate({ inputRange: LADYBUG_PHASES, outputRange: LADYBUG_ROUTE.map(({ y }) => y) }) },
+      { rotate: crawl.interpolate({ inputRange: LADYBUG_PHASES, outputRange: LADYBUG_ROUTE.map(({ angle }) => `${angle}deg`) }) },
     ]}>
       <G transform="translate(548 223) scale(.7)">
         <Ellipse cx="0" cy="2" rx="8" ry="9" fill="#54764f" opacity=".2" />
@@ -187,6 +188,9 @@ function TurtleBody({ route, feet, response, limbs, enabled, walking }) {
   const headFront = Math.abs(Math.sin(headAngle));
   const center = 43.5;
   const shellWidth = 23 - 3 * front;
+  // 壳底为二次曲线的中点（45 + front / 2），缩腿时降到脚掌的地面 y=50。
+  // 跟随四肢而非头部，保证探头张望时仍趴在地上。
+  const settle = (5 - front * .5) * pose.limbs;
   const headX = center + 25 * (1 - pose.response) * Math.cos(headAngle);
   const headY = 35 + 9 * (1 - pose.response) * Math.sin(headAngle) - 4 * pose.response;
   const tailExtension = 1 - .8 * pose.limbs;
@@ -215,6 +219,9 @@ function TurtleBody({ route, feet, response, limbs, enabled, walking }) {
   </G>;
   return (
     <Svg width="100%" height="100%" viewBox="0 0 87 56" style={StyleSheet.absoluteFill} accessible={false}>
+      <Ellipse cx={center} cy="50" rx={32 - 7 * pose.limbs} ry="3" fill="#a6b895" opacity=".55" />
+      <Ellipse cx={center} cy="50" rx={shellWidth - 2} ry="1.5" fill="#54764f" opacity={.28 * pose.limbs} />
+      <G transform={`translate(0 ${settle})`}>
       <G>
         <Path
           d={`M${tailPoint(19, 1)} Q${tailPoint(28, 5)} ${tailPoint(35, 6 + tailSway)} Q${tailPoint(28, 9)} ${tailPoint(18, 6)}Z`}
@@ -232,6 +239,7 @@ function TurtleBody({ route, feet, response, limbs, enabled, walking }) {
         <Path d="M-1 2 L10 -7" fill="none" stroke="#54764f" strokeWidth="1.2" strokeLinecap="round" />
       </G>
       <G opacity={Math.max(0, Math.min(1, Math.sin(headAngle) * 4))}>{head}</G>
+      </G>
     </Svg>
   );
 }
@@ -348,6 +356,19 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
       return;
     }
     response.setValue(0);
+    if (!peck) {
+      // 整只小鸟原地轻跳两次；头部不再叠加点击时的点头动作。
+      responseRun.current = Animated.timing(response, {
+        toValue: 1,
+        duration: 680,
+        easing: Easing.linear,
+        useNativeDriver: Platform.OS !== "web",
+      });
+      responseRun.current.start(({ finished }) => {
+        if (finished) response.setValue(0);
+      });
+      return;
+    }
     responseRun.current = Animated.sequence([
       Animated.timing(response, { toValue: 1, duration: 220, useNativeDriver: Platform.OS !== "web" }),
       Animated.delay(450),
@@ -362,7 +383,7 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
       // 面向左侧，以颈部为轴逆时针低头，让喙接近脚边的地面。
       outputRange: peck ? [0, -12, -58, -58, 0, -12, -58, -58, 0] : [0, 0, -12, 0, 0, 0],
     }),
-    response.interpolate({ inputRange: [0, 1], outputRange: [0, -18] }),
+    response.interpolate({ inputRange: [0, 1], outputRange: peck ? [0, -18] : [0, 0] }),
   ).interpolate({ inputRange: [-90, 30], outputRange: ["-90deg", "30deg"] });
   return (
     <AnimatedPressable
@@ -382,14 +403,20 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
         ],
       }}
     >
-      <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} accessible={false}>
-        <Ellipse cx={turtle ? 40 : 23} cy={height - 6} rx={turtle ? 32 : 16} ry="3" fill="#a6b895" opacity=".55" />
-      </Svg>
+      {!turtle && <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} accessible={false}>
+        <Ellipse cx="23" cy={height - 6} rx="16" ry="3" fill="#a6b895" opacity=".55" />
+      </Svg>}
       {turtle ? <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         <TurtleBody route={idle} feet={feet} response={response} limbs={limbs} enabled={enabled} walking={walking} />
       </View> : <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, {
         transform: [
-          { translateY: peck ? 0 : idle.interpolate({ inputRange: [0, .2, .35, .5, .65, 1], outputRange: [0, 0, -5, 0, -3, 0] }) },
+          { translateY: peck ? 0 : Animated.add(
+            idle.interpolate({ inputRange: [0, .2, .35, .5, .65, 1], outputRange: [0, 0, -5, 0, -3, 0] }),
+            response.interpolate({
+              inputRange: [0, .1, .22, .34, .44, .54, .66, .78, .9, 1],
+              outputRange: [0, -3, -6, -3, 0, 0, -5, -2.5, 0, 0],
+            }),
+          ) },
         ],
       }]}>
         <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} accessible={false}>
@@ -544,7 +571,11 @@ function Capy({
   lift = 0,
   gait = null,
   walking = false,
+  petting = false,
+  petProgress = 0,
 }) {
+  const petNod = Math.sin(petProgress * Math.PI * 2) * (1 - petProgress);
+  const petWiggle = Math.sin(petProgress * Math.PI * 4) * (1 - petProgress);
   let coordinate = 0;
   const outline = turn
     ? PROFILE.replace(/\d+/g, (value) =>
@@ -618,77 +649,44 @@ function Capy({
         strokeWidth="3"
       />
       <Ellipse cx="293" cy="265" rx="49" ry="23" fill="#cda278" opacity=".65" />
-      <Path
-        d="M222 167 C209 159 207 143 214 137 C223 130 234 138 240 150 Q237 162 222 167Z M325 151 C326 139 333 131 341 133 C351 134 355 144 350 153 Q347 160 340 163 Q329 162 325 151Z"
-        fill="#bc8c61"
-        stroke="#815d41"
-        strokeWidth="3"
-      />
-      <Path
-        d="M219 151 C215 143 222 139 228 146 Q231 150 229 154 Q223 155 219 151Z M333 149 C334 142 340 138 344 142 Q347 146 343 152 Q338 155 333 149Z"
-        fill="#a57555"
-      />
-      <Path d={outline} fill="#cca074" stroke="#815d41" strokeWidth="3" />
-      <Path
-        d="M225 169 C248 148 283 145 313 152"
-        fill="none"
-        stroke="#dbb78e"
-        strokeWidth="8"
-        strokeLinecap="round"
-        opacity=".7"
-      />
-      <Path
-        d="M325 238 Q356 243 382 222 C375 237 356 244 330 247 Q303 251 283 246 Q307 246 325 238Z"
-        fill="#d9b58b"
-        opacity={1 - turn}
-      />
-      <G transform={`translate(${-33 * turn} 0)`}>
-        {/* The resting profile dozes, but stays alert while walking. */}
-        {satisfied ? (
-          <Path
-            d="M281 193 Q289 186 297 193"
-            stroke="#5d4837"
-            strokeWidth="4"
-            strokeLinecap="round"
-            fill="none"
-          />
-        ) : blink || (!walking && turn < 0.5) ? (
-          <Path
-            d="M281 189 Q289 196 297 189"
-            stroke="#5d4837"
-            strokeWidth="4"
-            strokeLinecap="round"
-            fill="none"
-          />
-        ) : (
-          <>
-            <Circle cx="288" cy="191.5" r="3.4" fill="#5d4837" />
-            <Circle cx="286.7" cy="190.1" r="1.2" fill="#fffdf4" />
-          </>
-        )}
-        <Ellipse
-          cx="279"
-          cy="211"
-          rx="13"
-          ry="6"
-          fill="#d79479"
-          opacity=".65"
+      <G transform={`translate(0 ${4 * petNod}) rotate(${-5 * petNod} 292 238)`}>
+        <Path
+          d="M222 167 C209 159 207 143 214 137 C223 130 234 138 240 150 Q237 162 222 167Z M325 151 C326 139 333 131 341 133 C351 134 355 144 350 153 Q347 160 340 163 Q329 162 325 151Z"
+          fill="#bc8c61"
+          stroke="#815d41"
+          strokeWidth="3"
         />
-      </G>
-      {turn > 0 && (
-        <G opacity={turn}>
-          <Ellipse cx="290" cy="221" rx="32" ry="22" fill="#d9b58b" />
-          {satisfied ? (
+        <Path
+          d="M219 151 C215 143 222 139 228 146 Q231 150 229 154 Q223 155 219 151Z M333 149 C334 142 340 138 344 142 Q347 146 343 152 Q338 155 333 149Z"
+          fill="#a57555"
+        />
+        <Path d={outline} fill="#cca074" stroke="#815d41" strokeWidth="3" />
+        <Path
+          d="M225 169 C248 148 283 145 313 152"
+          fill="none"
+          stroke="#dbb78e"
+          strokeWidth="8"
+          strokeLinecap="round"
+          opacity=".7"
+        />
+        <Path
+          d="M325 238 Q356 243 382 222 C375 237 356 244 330 247 Q303 251 283 246 Q307 246 325 238Z"
+          fill="#d9b58b"
+          opacity={1 - turn}
+        />
+        <G transform={`translate(${-33 * turn} 0)`}>
+          {/* The resting profile dozes, but stays alert while walking. */}
+          {satisfied || petting ? (
             <Path
-              d="M315 193 Q323 186 331 193"
+              d="M281 193 Q289 186 297 193"
               stroke="#5d4837"
               strokeWidth="4"
               strokeLinecap="round"
               fill="none"
             />
-          ) : blink ? (
+          ) : blink || (!walking && turn < 0.5) ? (
             <Path
-              d="M315 189 Q323 196 331 189"
+              d="M281 189 Q289 196 297 189"
               stroke="#5d4837"
               strokeWidth="4"
               strokeLinecap="round"
@@ -696,125 +694,160 @@ function Capy({
             />
           ) : (
             <>
-              <Circle cx="322" cy="191.5" r="3.4" fill="#5d4837" />
-              <Circle cx="320.7" cy="190.1" r="1.2" fill="#fffdf4" />
+              <Circle cx="288" cy="191.5" r="3.4" fill="#5d4837" />
+              <Circle cx="286.7" cy="190.1" r="1.2" fill="#fffdf4" />
             </>
           )}
           <Ellipse
-            cx="335"
+            cx="279"
             cy="211"
             rx="13"
             ry="6"
             fill="#d79479"
-            opacity=".65"
-          />
-          <Path
-            d="M281 212 L284 211 M296 211 L299 212"
-            stroke="#74563f"
-            strokeWidth="3"
-            strokeLinecap="round"
-            fill="none"
+            opacity={petting ? 1 : .65}
           />
         </G>
-      )}
-      {turn > 0 &&
-        (tilt > 0.1 ? (
-          <Ellipse
-            cx="290"
-            cy="231"
-            rx="4"
-            ry="3"
-            fill="#74563f"
-            opacity={turn}
-          />
-        ) : (
-          <Path
-            d={
-              satisfied
-                ? "M277 225 Q290 241 303 225"
-                : "M280 226 Q290 234 300 226"
-            }
-            fill="none"
-            stroke="#74563f"
-            strokeWidth="3"
-            strokeLinecap="round"
-            opacity={turn}
-          />
-        ))}
-      <Path
-        d="M374 198 L377 199 M362 223 Q371 226 379 220"
-        stroke="#74563f"
-        strokeWidth="3"
-        strokeLinecap="round"
-        fill="none"
-        opacity={1 - turn}
-      />
-      {accessory === "orange" && (
-        <G transform="rotate(-9 285 130)">
-          <Ellipse
-            cx="283"
-            cy="135"
-            rx="25"
-            ry="5"
-            fill="#ad7d54"
-            opacity=".25"
-          />
-          <Circle cx="282" cy="117" r="23" fill="#eea342" />
-          <Path
-            d="M263 110 Q269 97 281 98"
-            fill="none"
-            stroke="#f7c679"
-            strokeWidth="5"
-            strokeLinecap="round"
-          />
-          <Path
-            d="M283 95 Q284 83 294 81"
-            stroke="#647c46"
-            strokeWidth="3"
-            fill="none"
-          />
-          <Path d="M286 94 Q309 98 305 80 Q291 80 286 94Z" fill="#6d8b53" />
-          <Circle cx="292" cy="120" r="1.5" fill="#d89034" />
-          <Circle cx="286" cy="128" r="1.5" fill="#d89034" />
-        </G>
-      )}
-      {accessory === "flower" && (
-        <G>
-          <Path
-            d="M253 143 Q283 124 318 143"
-            stroke="#6c8953"
-            strokeWidth="7"
-            fill="none"
-          />
-          {[259, 282, 307].map((x, i) => (
-            <G key={x}>
-              <Circle cx={x - 6} cy={135 - (i % 2) * 5} r="8" fill="#f1b9b2" />
-              <Circle cx={x + 6} cy={135 - (i % 2) * 5} r="8" fill="#f1b9b2" />
-              <Circle cx={x} cy={128 - (i % 2) * 5} r="8" fill="#f1b9b2" />
-              <Circle cx={x} cy={136 - (i % 2) * 5} r="5" fill="#f0cd70" />
-            </G>
+        {turn > 0 && (
+          <G opacity={turn}>
+            <Ellipse cx="290" cy="221" rx="32" ry="22" fill="#d9b58b" />
+            {satisfied || petting ? (
+              <Path
+                d="M315 193 Q323 186 331 193"
+                stroke="#5d4837"
+                strokeWidth="4"
+                strokeLinecap="round"
+                fill="none"
+              />
+            ) : blink ? (
+              <Path
+                d="M315 189 Q323 196 331 189"
+                stroke="#5d4837"
+                strokeWidth="4"
+                strokeLinecap="round"
+                fill="none"
+              />
+            ) : (
+              <>
+                <Circle cx="322" cy="191.5" r="3.4" fill="#5d4837" />
+                <Circle cx="320.7" cy="190.1" r="1.2" fill="#fffdf4" />
+              </>
+            )}
+            <Ellipse
+              cx="335"
+              cy="211"
+              rx="13"
+              ry="6"
+              fill="#d79479"
+              opacity={petting ? 1 : .65}
+            />
+            <Path
+              d="M281 212 L284 211 M296 211 L299 212"
+              stroke="#74563f"
+              strokeWidth="3"
+              strokeLinecap="round"
+              fill="none"
+            />
+          </G>
+        )}
+        {turn > 0 &&
+          (tilt > 0.1 ? (
+            <Ellipse
+              cx="290"
+              cy="231"
+              rx="4"
+              ry="3"
+              fill="#74563f"
+              opacity={turn}
+            />
+          ) : (
+            <Path
+              d={
+                satisfied || petting
+                  ? "M277 225 Q290 241 303 225"
+                  : "M280 226 Q290 234 300 226"
+              }
+              fill="none"
+              stroke="#74563f"
+              strokeWidth="3"
+              strokeLinecap="round"
+              opacity={turn}
+            />
           ))}
-        </G>
-      )}
-      {accessory === "towel" && (
-        <G transform="rotate(-8 280 130)">
-          <Rect
-            x="248"
-            y="114"
-            width="69"
-            height="25"
-            rx="9"
-            fill="#f7f4e5"
-            stroke="#c9c9b6"
-            strokeWidth="2"
-          />
-          <Path
-            d="M258 121 H307 M259 127 H307"
-            stroke="#d8dec8"
-            strokeWidth="2"
-          />
-        </G>
-      )}
+        <Path
+          d="M374 198 L377 199 M362 223 Q371 226 379 220"
+          stroke="#74563f"
+          strokeWidth="3"
+          strokeLinecap="round"
+          fill="none"
+          opacity={1 - turn}
+        />
+        {accessory === "orange" && (
+          <G transform={`rotate(${-9 + 12 * petWiggle} 285 140)`}>
+            <Ellipse
+              cx="283"
+              cy="135"
+              rx="25"
+              ry="5"
+              fill="#ad7d54"
+              opacity=".25"
+            />
+            <Circle cx="282" cy="117" r="23" fill="#eea342" />
+            <Path
+              d="M263 110 Q269 97 281 98"
+              fill="none"
+              stroke="#f7c679"
+              strokeWidth="5"
+              strokeLinecap="round"
+            />
+            <Path
+              d="M283 95 Q284 83 294 81"
+              stroke="#647c46"
+              strokeWidth="3"
+              fill="none"
+            />
+            <Path d="M286 94 Q309 98 305 80 Q291 80 286 94Z" fill="#6d8b53" />
+            <Circle cx="292" cy="120" r="1.5" fill="#d89034" />
+            <Circle cx="286" cy="128" r="1.5" fill="#d89034" />
+          </G>
+        )}
+        {accessory === "flower" && (
+          <G>
+            <Path
+              d="M253 143 Q283 124 318 143"
+              stroke="#6c8953"
+              strokeWidth="7"
+              fill="none"
+            />
+            {[259, 282, 307].map((x, i) => (
+              <G key={x}>
+                <Circle cx={x - 6} cy={135 - (i % 2) * 5} r="8" fill="#f1b9b2" />
+                <Circle cx={x + 6} cy={135 - (i % 2) * 5} r="8" fill="#f1b9b2" />
+                <Circle cx={x} cy={128 - (i % 2) * 5} r="8" fill="#f1b9b2" />
+                <Circle cx={x} cy={136 - (i % 2) * 5} r="5" fill="#f0cd70" />
+              </G>
+            ))}
+          </G>
+        )}
+        {accessory === "towel" && (
+          <G transform="rotate(-8 280 130)">
+            <Rect
+              x="248"
+              y="114"
+              width="69"
+              height="25"
+              rx="9"
+              fill="#f7f4e5"
+              stroke="#c9c9b6"
+              strokeWidth="2"
+            />
+            <Path
+              d="M258 121 H307 M259 127 H307"
+              stroke="#d8dec8"
+              strokeWidth="2"
+            />
+          </G>
+        )}
+      </G>
       {!mini && (
         <>
           <Path
@@ -927,6 +960,11 @@ export default function CapyScene({
   const flight = useRef(new Animated.Value(0)).current;
   const cloud = useRef(new Animated.Value(0)).current;
   const hearts = useRef(new Animated.Value(0)).current;
+  const petAnimation = useRef(new Animated.Value(0)).current;
+  const [petRequest, setPetRequest] = React.useState(0);
+  const consumedPet = useRef(0);
+  const [petting, setPetting] = React.useState(false);
+  const [petProgress, setPetProgress] = React.useState(0);
   const [blink, setBlink] = React.useState(false);
   const [pose, setPose] = React.useState(null);
   const [sipCelebration, setSipCelebration] = React.useState(0);
@@ -948,6 +986,40 @@ export default function CapyScene({
     );
     return () => subscription.remove();
   }, []);
+  useEffect(() => {
+    setPetProgress(0);
+    setPetting(false);
+    if (!petRequest || petRequest === consumedPet.current || paused || !active) return;
+    consumedPet.current = petRequest;
+    setPetting(true);
+    // 减少动态时只显示开心表情；SVG 头部形变需由 JS driver 更新。
+    if (!motion) {
+      const timeout = setTimeout(() => setPetting(false), 1100);
+      return () => clearTimeout(timeout);
+    }
+    petAnimation.setValue(0);
+    const listener = petAnimation.addListener(({ value }) => setPetProgress(value));
+    const animation = Animated.timing(petAnimation, {
+      toValue: 1,
+      duration: 1100,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    });
+    animation.start(({ finished }) => {
+      if (finished) {
+        setPetting(false);
+        setPetProgress(0);
+      }
+    });
+    return () => {
+      animation.stop();
+      petAnimation.removeListener(listener);
+    };
+  }, [petRequest, motion, paused, active, petAnimation]);
+  const handlePet = () => {
+    setPetRequest((count) => count + 1);
+    onPet?.();
+  };
   useEffect(() => {
     if (drinkRequest === consumedDrink.current || pose || paused || !active) return;
     consumedDrink.current = drinkRequest;
@@ -1438,7 +1510,7 @@ export default function CapyScene({
         ]}
       >
         <Svg width="100%" height="100%" viewBox={frame}>
-          <G transform={`translate(${travelX} ${travelY + weightShift}) rotate(${lean} 292 288)`}>
+          <G transform={`translate(${travelX} ${travelY + weightShift + 3 * Math.sin(petProgress * Math.PI * 2) * (1 - petProgress)}) rotate(${lean} 292 288)`}>
             <Capy
               beverage={beverage}
               accessory={accessory}
@@ -1452,6 +1524,8 @@ export default function CapyScene({
               lift={pose?.lift}
               gait={gait}
               walking={walking}
+              petting={petting}
+              petProgress={petProgress}
             />
           </G>
         </Svg>
@@ -1565,7 +1639,7 @@ export default function CapyScene({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="摸摸卡皮的头"
-        onPress={onPet}
+        onPress={handlePet}
         style={StyleSheet.absoluteFill}
       />
       {["turtle", "peck", "hop"].map((kind) => (

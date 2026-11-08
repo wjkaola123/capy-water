@@ -18,7 +18,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import Feather from "@expo/vector-icons/Feather";
-import Svg, { Circle, Path } from "react-native-svg";
+import Svg, { Circle, Path, Defs, ClipPath, Ellipse } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import CapyScene, { CapyAvatar, CapyEffectIcon, CapyBeverageIcon, CapyStartupIllustration } from "./src/CapyScene";
 import {
@@ -252,6 +252,115 @@ function GardenPlant({ height = 44, size = 32 }) {
   );
 }
 
+const AnimatedWaterPath = Animated.createAnimatedComponent(Path);
+
+function JourneyWater({ index, level, amount, chosen, tide, motion }) {
+  const clipId = `bay-${index}`;
+  const paths = React.useMemo(() => {
+    const inputRange = [0, 0.25, 0.5, 0.75, 1];
+    const surfaces = inputRange.map((step) => {
+      const phase = step * Math.PI * 2 + index * 0.85;
+      const y = level + (motion ? Math.sin(phase) * 1.3 : 0);
+      const bend = motion ? Math.cos(phase) * 2.2 : 0;
+      return `M0 ${y} Q15 ${y - bend} 30 ${y} T60 ${y}`;
+    });
+    return {
+      water: tide.interpolate({ inputRange, outputRange: surfaces.map((path) => `${path} L60 48 L0 48 Z`) }),
+      ripple: tide.interpolate({ inputRange, outputRange: surfaces }),
+    };
+  }, [index, level, tide, motion]);
+  return (
+    <Svg width={60} height={46} viewBox="0 0 60 46" aria-hidden={true}>
+      <Defs><ClipPath id={clipId}><Ellipse cx="30" cy="24" rx="27" ry="19" /></ClipPath></Defs>
+      <Ellipse cx="30" cy="24" rx="27" ry="19" fill="#f7f8f2" stroke={chosen ? C.green : "#cddcc2"} strokeWidth={chosen ? 2 : 1} />
+      {amount > 0 && <>
+        <AnimatedWaterPath d={paths.water} fill="#83b39d" clipPath={`url(#${clipId})`} />
+        <AnimatedWaterPath d={paths.ripple} stroke="#fff" opacity={0.65} fill="none" clipPath={`url(#${clipId})`} />
+        <Path d="M37 13 Q47 5 51 11 Q46 19 37 13Z" fill="#54764f" />
+      </>}
+    </Svg>
+  );
+}
+
+function QuarterJourney({ days, selected, onSelect }) {
+  const motion = React.useContext(MotionContext);
+  const tide = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    let animation;
+    const update = (status) => {
+      animation?.stop();
+      tide.setValue(0);
+      if (!motion || status !== "active") return;
+      animation = Animated.loop(Animated.timing(tide, {
+        toValue: 1,
+        duration: 5200,
+        easing: Easing.linear,
+        // SVG 路径形变不支持 native driver；所有水面共用一个动画时钟。
+        useNativeDriver: false,
+        isInteraction: false,
+      }));
+      animation.start();
+    };
+    update(AppState.currentState);
+    const subscription = AppState.addEventListener("change", update);
+    return () => { animation?.stop(); subscription.remove(); };
+  }, [motion, tide]);
+  const bays = Array.from({ length: Math.ceil(days.length / 7) }, (_, index) => {
+    const week = days.slice(index * 7, index * 7 + 7);
+    return { days: week, amount: week.reduce((sum, day) => sum + day.amount, 0) };
+  });
+  const active = bays.findIndex((bay) => bay.days.some((day) => day.key === selected.key));
+  const current = bays[active];
+  const max = Math.max(...bays.map((bay) => bay.amount), 1);
+  const shortDate = (day) => `${day.date.getMonth() + 1}.${day.date.getDate()}`;
+  return (
+    <View>
+      <View style={s.journeyHeading}>
+        <Icon name="navigation" size={18} />
+        <Text style={s.journeyTitle}>水分漂流记</Text>
+        <Text style={s.journeyUnit}>每湾最多 7 天 · 单位 L</Text>
+      </View>
+      <Text style={s.journeyHint}>顺着小溪逛一逛，水湾越满，记录水量越多。</Text>
+      <View style={s.journeyMap}>
+        {Array.from({ length: Math.ceil(bays.length / 4) }, (_, row) => (
+          <View key={row} style={[s.journeyRow, row % 2 === 1 && { flexDirection: "row-reverse" }]}>
+            {bays.slice(row * 4, row * 4 + 4).length > 1 && <View pointerEvents="none" style={s.journeyStream} />}
+            {row < Math.ceil(bays.length / 4) - 1 && <View pointerEvents="none" style={[s.journeyTurn, row % 2 === 0 ? { right: "12.5%" } : { left: "12.5%" }]} />}
+            {bays.slice(row * 4, row * 4 + 4).map((bay, column) => {
+              const index = row * 4 + column;
+              const chosen = index === active;
+              const level = bay.amount ? 43 - (bay.amount / max) * 34 : 45;
+              return (
+                <Pressable key={index} accessibilityRole="button"
+                  accessibilityLabel={`第${index + 1}湾，${shortDate(bay.days[0])}至${shortDate(bay.days.at(-1))}，记录${bay.amount}毫升`}
+                  accessibilityState={{ selected: chosen }} aria-pressed={chosen}
+                  onPress={() => onSelect(bay.days.at(-1).key)} style={[s.journeyBay, chosen && s.journeyBaySelected]}>
+                  <Text style={[s.journeyBayName, chosen && { color: C.green }]}>{index === bays.length - 1 ? "这一湾 · 今天" : `第 ${index + 1} 湾`}</Text>
+                  <JourneyWater index={index} level={level} amount={bay.amount} chosen={chosen} tide={tide} motion={motion} />
+                  <Text style={s.journeyAmount}>{bay.amount ? (bay.amount / 1000).toFixed(1) : "—"}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ))}
+      </View>
+      <View style={s.journeyWeekHeader}>
+        <Text style={s.journeyWeekTitle}>{shortDate(current.days[0])} — {shortDate(current.days.at(-1))}</Text>
+      </View>
+      <View style={s.journeyDays}>
+        {current.days.map((day) => (
+          <Pressable key={day.key} accessibilityRole="button" accessibilityLabel={`${day.key}，${day.cups ? `${day.amount}毫升，${day.cups}杯` : "未记录"}`}
+            accessibilityState={{ selected: day.key === selected.key }} aria-pressed={day.key === selected.key}
+            onPress={() => onSelect(day.key)} style={[s.journeyDay, day.key === selected.key && s.journeyDaySelected]}>
+            <Text style={s.gardenDate}>{day.date.getDate()}日</Text>
+            <Icon name={day.cups ? "droplet" : "minus"} size={13} color={day.cups ? C.green : C.muted} />
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function WaterGarden({ entries, now }) {
   const [range, setRange] = useState(7);
   const [selectedKey, setSelectedKey] = useState(null);
@@ -264,7 +373,7 @@ function WaterGarden({ entries, now }) {
   const cells = [ ...Array(data.days[0].date.getDay()).fill(null), ...data.days ];
   while (cells.length % 7) cells.push(null);
   const weeks = Array.from({ length: cells.length / 7 }, (_, index) => cells.slice(index * 7, index * 7 + 7));
-  const renderDay = (day, compact = false, index = 0) => day ? (
+  const renderDay = (day, index = 0) => day ? (
     <Pressable
       key={day.key}
       accessibilityRole="button"
@@ -272,14 +381,14 @@ function WaterGarden({ entries, now }) {
       accessibilityState={{ selected: day.key === selected.key }}
       aria-pressed={day.key === selected.key}
       onPress={() => setSelectedKey(day.key)}
-      style={[s.gardenDay, compact && s.gardenDayCompact, day.cups > 0 && s.gardenDayRecorded, day.key === selected.key && s.gardenDaySelected]}
+      style={[s.gardenDay, day.cups > 0 && s.gardenDayRecorded, day.key === selected.key && s.gardenDaySelected]}
     >
-      {day.key === todayKey ? <Icon name="sun" size={compact ? 12 : 18} color="#eea342" />
-        : day.cups > 0 ? <Icon name="feather" size={compact ? 11 : 17} color={C.green} />
+      {day.key === todayKey ? <Icon name="sun" size={18} color="#eea342" />
+        : day.cups > 0 ? <Icon name="feather" size={17} color={C.green} />
         : <View style={s.gardenSoil} />}
-      {!compact && <Text style={s.gardenDate}>{day.date.getDate()}</Text>}
+      <Text style={s.gardenDate}>{day.date.getDate()}</Text>
     </Pressable>
-  ) : <View key={`blank-${index}`} style={[s.gardenDay, compact && s.gardenDayCompact, { backgroundColor: "transparent" }]} />;
+  ) : <View key={`blank-${index}`} style={[s.gardenDay, { backgroundColor: "transparent" }]} />;
   return (
     <View style={s.card}>
       <SectionTitle title="卡皮的水分花园" icon="feather" />
@@ -317,20 +426,16 @@ function WaterGarden({ entries, now }) {
       ) : range === 30 ? (
         <View style={{ gap: 5 }}>
           <View style={s.gardenCalendarRow}>{weekdays.map((label) => <Text key={label} style={s.gardenWeekday}>{label}</Text>)}</View>
-          {weeks.map((week, index) => <View key={index} style={s.gardenCalendarRow}>{week.map((day, dayIndex) => renderDay(day, false, dayIndex))}</View>)}
+          {weeks.map((week, index) => <View key={index} style={s.gardenCalendarRow}>{week.map((day, dayIndex) => renderDay(day, dayIndex))}</View>)}
         </View>
       ) : (
-        <View style={s.gardenQuarter}>
-          <View style={s.gardenWeekAxis}>{weekdays.map((label) => <Text key={label} style={s.gardenAxisLabel}>{label}</Text>)}</View>
-          {weeks.map((week, index) => <View key={index} style={s.gardenWeekColumn}>{week.map((day, dayIndex) => renderDay(day, true, dayIndex))}</View>)}
-        </View>
+        <QuarterJourney days={data.days} selected={selected} onSelect={setSelectedKey} />
       )}
-      <View style={s.gardenLegend}>
+      {range !== 90 && <View style={s.gardenLegend}>
         <Icon name="feather" size={12} /><Text style={s.tiny}>有记录</Text>
         <View style={s.gardenSoil} /><Text style={s.tiny}>未记录</Text>
         <Icon name="sun" size={12} color="#eea342" /><Text style={s.tiny}>今天</Text>
-      </View>
-      {range === 90 && <Text style={s.gardenFootnote}>每列是一周，从左往右读。点一点，看看那一天。</Text>}
+      </View>}
       <View style={s.gardenDetail} accessibilityLiveRegion="polite">
         <Text style={s.gardenDetailDate}>{selected.key}</Text>
         <Text style={s.gardenDetailText}>{selected.cups ? `${selected.amount.toLocaleString()} ml · ${selected.cups} 杯` : "这一天还没有记录"}</Text>
@@ -343,7 +448,6 @@ function WaterGarden({ entries, now }) {
           </View>
         ))}
       </View>
-      <Text style={s.gardenFootnote}>未记录不代表没有喝水。慢慢来，随时都能继续。</Text>
     </View>
   );
 }
