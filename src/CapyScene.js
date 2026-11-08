@@ -867,6 +867,26 @@ function Capy({
   );
 }
 
+// 启动插画保持静态，读取动画偏好前也不会产生非必要动态。
+export function CapyStartupIllustration() {
+  return (
+    <Svg width="100%" height="100%" viewBox="90 35 400 330" accessible={false}>
+      <Circle cx="290" cy="185" r="140" fill="#e8eeda" />
+      <Path d="M167 234 Q133 214 145 191 Q170 197 167 234 M409 232 Q440 205 428 183 Q403 196 409 232" fill="#83b39d" />
+      <Ellipse cx="290" cy="287" rx="165" ry="55" fill="#e8eeda" />
+      <Ellipse cx="290" cy="278" rx="153" ry="48" fill="#83b39d" />
+      <Ellipse cx="290" cy="275" rx="130" ry="35" fill="none" stroke="#f7f8f2" strokeWidth="2" opacity="0.5" />
+      <Capy mini blink turn={1} />
+      <Path d="M186 260 Q290 309 394 260 Q381 310 290 313 Q199 310 186 260Z" fill="#83b39d" />
+      <Path d="M209 284 Q232 291 251 289 M321 289 Q343 291 365 284" fill="none" stroke="#f7f8f2" strokeWidth="3" strokeLinecap="round" />
+      <G fill="none" stroke="#54764f" strokeWidth="3" strokeLinecap="round" opacity="0.35">
+        <Path d="M190 163 C174 146 200 135 189 118" />
+        <Path d="M390 156 C374 139 400 128 389 111" />
+      </G>
+    </Svg>
+  );
+}
+
 export function CapyAvatar({ size = 54, accessory = "orange" }) {
   return (
     <View

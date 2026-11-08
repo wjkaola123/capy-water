@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
-  ActivityIndicator,
   Animated,
   AppState,
   Easing,
@@ -21,7 +20,7 @@ import { StatusBar } from "expo-status-bar";
 import Feather from "@expo/vector-icons/Feather";
 import Svg, { Circle, Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
-import CapyScene, { CapyAvatar, CapyEffectIcon, CapyBeverageIcon } from "./src/CapyScene";
+import CapyScene, { CapyAvatar, CapyEffectIcon, CapyBeverageIcon, CapyStartupIllustration } from "./src/CapyScene";
 import {
   companionDays,
   createEntry,
@@ -398,6 +397,27 @@ function ToastMessage({ toast, motion, desktop, onUndo, onDismiss }) {
   );
 }
 
+function StartupScreen() {
+  return (
+    <SafeAreaView style={s.loading}>
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={s.startupContent}>
+        <View style={s.startupMain}>
+          <Text style={s.startupTitle} accessibilityRole="header">卡皮补水站</Text>
+          <Text style={s.startupTagline}>喝一口水，歇一小会儿</Text>
+          <View style={s.startupArt} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <CapyStartupIllustration />
+          </View>
+          <View accessibilityRole="progressbar" accessibilityLabel="正在读取饮水记录" accessibilityState={{ busy: true }} style={s.startupStatus}>
+            <View style={s.startupDrop} />
+            <Text style={s.startupStatusText}>正在翻开你的饮水手记…</Text>
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
 function AppContent() {
   const {
     state,
@@ -653,14 +673,9 @@ function AppContent() {
         </View>
       </View>
     );
-  if (!ready)
-    return (
-      <View style={s.loading}>
-        <CapyAvatar size={85} />
-        <ActivityIndicator color={C.green} style={{ marginTop: 25 }} />
-        <Text style={s.subtitle}>卡皮正在为你准备温泉…</Text>
-      </View>
-    );
+  const previewStartup = __DEV__ && Platform.OS === "web" &&
+    new URLSearchParams(window.location.search).get("previewStartup") === "1";
+  if (!ready || previewStartup) return <StartupScreen />;
   return (
     <MotionContext.Provider value={motion}>
       <SafeAreaView
