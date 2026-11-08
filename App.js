@@ -1152,7 +1152,6 @@ function AppContent() {
                   </View>
                   <View style={s.card}>
                     <SectionTitle title="陪卡皮喝点什么" icon="coffee" />
-                    <Text style={s.beverageHint}>挑一杯喜欢的，陪卡皮坐一会儿。</Text>
                     <View style={s.effectOptions} accessibilityRole="radiogroup" accessibilityLabel="卡皮的饮料">
                       {[
                         ["tea", "茶", "矮口陶杯"],
@@ -1173,7 +1172,6 @@ function AppContent() {
                         >
                           <CapyBeverageIcon beverage={id} />
                           <Text style={s.effectLabel}>{title}</Text>
-                          <Text style={s.beverageCaption}>{cup}</Text>
                           {state.beverage === id && (
                             <View style={s.cupCheck}>
                               <Icon name="check" size={9} color="#fff" />

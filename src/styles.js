@@ -259,8 +259,7 @@ export const s = StyleSheet.create({
   },
   effectLabel: { fontSize: 12, fontWeight: "600", color: C.green },
   beverageHint: { fontSize: 13, color: C.muted, lineHeight: 20, marginTop: 8 },
-  beverageOption: { minHeight: 138, gap: 5, paddingVertical: 12 },
-  beverageCaption: { fontSize: 11, color: C.muted },
+  beverageOption: { minHeight: 120, gap: 5, paddingVertical: 12 },
   cupAmount: { fontSize: 14, fontWeight: "700", color: "#849377" },
   cupUnit: { fontSize: 9, fontWeight: "400" },
   cupCheck: {

@@ -34,17 +34,20 @@ const mix = (from, to, amount) => from + (to - from) * amount;
 // 杯底落在左前方池沿的同一接触点；杯口是举杯与倾斜的共同锚点。
 function cupGeometry(beverage) {
   const scale = beverage === "coffee" ? 0.82 : beverage === "juice" ? 0.72 : 1;
+  const scaleX = beverage === "tea" ? 0.84 : scale;
   const base = beverage === "coffee" ? 295 : beverage === "juice" ? 306 : 285;
   return {
     scale,
-    restX: 174 - (316 + (290 - 316) * scale),
+    scaleX,
+    restX: 174 - (316 + (290 - 316) * scaleX),
     restY: 336 - (251 + (base - 251) * scale),
   };
 }
 const APPROACH_X = -86;
 const APPROACH_Y = 20;
 const WATER_PER_SIP = 0.25;
-const CUP_HANDLE = "M275 259 C264 253 248 251 247 263 C246 274 259 280 279 274";
+const CUP_HANDLE = "M272 259 C263 255 254 254 254 263 C254 271 263 274 275 271";
+const JUICE_STRAW_TIP = { x: 308, y: 220 };
 const BIRD_FLAP_PHASES = Array.from({ length: 37 }, (_, index) => index / 36);
 const BIRD_WING_SCALE = BIRD_FLAP_PHASES.map((_, index) =>
   index % 2 === 0 ? 1 : 0.35,
@@ -458,7 +461,7 @@ function hindFootPose(cycle, direction, offset) {
 }
 
 function Cup({ x = 0, y = 0, tilt = 0, water, beverage = "tea" }) {
-  const { scale } = cupGeometry(beverage);
+  const { scale, scaleX } = cupGeometry(beverage);
   const waterClip = `cup-water-${React.useId().replace(/:/g, "")}`;
   const coffee = beverage === "coffee";
   const juice = beverage === "juice";
@@ -469,14 +472,14 @@ function Cup({ x = 0, y = 0, tilt = 0, water, beverage = "tea" }) {
       ? "M264 251 L266 283 Q267 295 290 295 Q313 295 314 283 L316 251Z"
       : "M264 253 L272 281 Q292 289 310 281 L316 251Z";
   const liquid = juice ? "#eea342" : coffee ? "#815d41" : "#8eb8a0";
-  const cupAngle = 32 * tilt;
+  const cupAngle = juice ? 0 : 32 * tilt;
   const angle = (cupAngle * Math.PI) / 180;
   const surfaceY = mix(bottom, 256, water);
   const leftWaterY = surfaceY + 26 * Math.tan(angle);
   const rightWaterY = surfaceY - 26 * Math.tan(angle);
   return (
     <G
-      transform={`translate(${x} ${y}) rotate(${cupAngle} 316 251) translate(316 251) scale(${scale}) translate(-316 -251)`}
+      transform={`translate(${x} ${y}) rotate(${cupAngle} 316 251) translate(316 251) scale(${scaleX} ${scale}) translate(-316 -251)`}
     >
       <Defs>
         <ClipPath id={waterClip}>
@@ -484,13 +487,13 @@ function Cup({ x = 0, y = 0, tilt = 0, water, beverage = "tea" }) {
         </ClipPath>
       </Defs>
       {!juice && <Path
-        d={coffee ? "M265 259 C236 250 238 285 265 280" : CUP_HANDLE}
+        d={coffee ? "M267 260 C259 257 251 258 251 266 C251 273 259 276 269 273" : CUP_HANDLE}
         fill="none"
         stroke="#8e9676"
         strokeWidth="6"
       />}
       {!juice && <Path
-        d={coffee ? "M265 259 C236 250 238 285 265 280" : CUP_HANDLE}
+        d={coffee ? "M267 260 C259 257 251 258 251 266 C251 273 259 276 269 273" : CUP_HANDLE}
         fill="none"
         stroke="#f7f4e4"
         strokeWidth="2.5"
@@ -541,6 +544,14 @@ function Cup({ x = 0, y = 0, tilt = 0, water, beverage = "tea" }) {
       />
       {juice && (
         <G>
+          <Path d="M278 263 L286 261 L288 269 L280 271Z M294 269 L302 270 L301 278 L293 277Z" fill="#fffdf3" opacity={0.5} />
+          <Path d={`M289 291 L294 229 Q294 220 300 220 H${JUICE_STRAW_TIP.x}`} fill="none" stroke="#54764f" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+          <Path d={`M289 291 L294 229 Q294 220 300 220 H${JUICE_STRAW_TIP.x}`} fill="none" stroke="#e8eeda" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          <Path d="M274 222 L288 266" stroke="#cca074" strokeWidth="2.5" strokeLinecap="round" />
+          <Path d="M251 237 Q257 220 273 216 Q289 219 301 232 Q295 230 290 235 Q282 230 277 237 Q269 232 263 239 Q257 235 251 237Z" fill="#eea342" stroke="#cca074" strokeWidth="1.5" strokeLinejoin="round" />
+          <Path d="M273 216 Q265 225 263 239 Q269 232 277 237 Q276 224 273 216Z" fill="#fffdf3" />
+          <Path d="M273 216 Q284 222 290 235" stroke="#fffdf3" strokeWidth="1.3" fill="none" />
+          <Path d="M273 216 L272 212" stroke="#cca074" strokeWidth="2" strokeLinecap="round" />
           <Path d="M302 249 A12 12 0 0 1 326 249Z" fill="#eea342" stroke="#f7c679" strokeWidth="2" />
           <Path d="M314 249 L306 241 M314 249 V238 M314 249 L322 241" stroke="#fffdf1" strokeWidth="1.5" />
         </G>
@@ -550,9 +561,14 @@ function Cup({ x = 0, y = 0, tilt = 0, water, beverage = "tea" }) {
 }
 
 export function CapyBeverageIcon({ beverage }) {
+  // 杯把不参与水平居中：用场景缩放后的杯身中心对齐下方文字。
+  const centerX = beverage === "juice" ? 298 : 316 + (290 - 316) * cupGeometry(beverage).scaleX;
+  const centerY = beverage === "tea" ? 265 : beverage === "juice" ? 258 : 267;
   return (
-    <Svg width={66} height={58} viewBox="235 233 96 84" aria-hidden={true}>
-      <Cup beverage={beverage} water={0.8} />
+    <Svg width={54} height={48} viewBox="0 0 96 84" aria-hidden={true}>
+      <G transform={`translate(48 42) translate(${-centerX} ${-centerY})`}>
+        <Cup beverage={beverage} water={0.8} />
+      </G>
     </Svg>
   );
 }
@@ -582,14 +598,18 @@ function Capy({
         mix(Number(value), FRONT_COORDS[coordinate++], turn).toFixed(2),
       )
     : PROFILE;
-  const { scale: cupScale, restX, restY } = cupGeometry(beverage);
-  const cupX = mix(restX - APPROACH_X, -26 * sip, lift);
-  const cupY = mix(restY - APPROACH_Y, 20 - 41 * sip, lift);
-  const cupAngle = 32 * tilt;
+  const { scale: cupScale, scaleX: cupScaleX, restX, restY } = cupGeometry(beverage);
+  const juice = beverage === "juice";
+  // 果汁杯保持直立，让缩放后的吸管末端准确落在嘴巴 (290, 231)。
+  const sipX = juice ? 290 - (316 + (JUICE_STRAW_TIP.x - 316) * cupScale) : -26;
+  const sipY = juice ? 231 - (251 + (JUICE_STRAW_TIP.y - 251) * cupScale) : -21;
+  const cupX = mix(restX - APPROACH_X, sipX * sip, lift);
+  const cupY = mix(restY - APPROACH_Y, mix(20, sipY, sip), lift);
+  const cupAngle = juice ? 0 : 32 * tilt;
   const angle = (cupAngle * Math.PI) / 180;
   // Hand and cup share the same transform, so the wrist stays attached while tilting.
   const handPoint = (x, y) => {
-    const dx = (x - 316) * cupScale;
+    const dx = (x - 316) * cupScaleX;
     const dy = (y - 251) * cupScale;
     return `${316 + cupX + dx * Math.cos(angle) - dy * Math.sin(angle)} ${251 + cupY + dx * Math.sin(angle) + dy * Math.cos(angle)}`;
   };
@@ -750,12 +770,12 @@ function Capy({
           </G>
         )}
         {turn > 0 &&
-          (tilt > 0.1 ? (
+          ((juice ? sip > 0.9 : tilt > 0.1) ? (
             <Ellipse
               cx="290"
               cy="231"
-              rx="4"
-              ry="3"
+              rx={juice ? 2.8 : 4}
+              ry={juice ? 2.2 : 3}
               fill="#74563f"
               opacity={turn}
             />
@@ -859,6 +879,9 @@ function Capy({
             strokeLinejoin="round"
           />
           {holdingCup && <Cup x={cupX} y={cupY} tilt={tilt} water={water} beverage={beverage} />}
+          {holdingCup && juice && sip > 0.98 && (
+            <Ellipse cx="290" cy="231" rx="2.8" ry="2.2" fill="#74563f" />
+          )}
           {!holdingCup && (
             <Path
               d="M233 246 C227 255 229 270 235 278 Q241 284 248 279 C253 275 247 269 246 263 L245 252"
@@ -880,7 +903,7 @@ function Capy({
                 strokeLinejoin="round"
               />
               <G
-                transform={`translate(${cupX} ${cupY}) rotate(${cupAngle} 316 251) translate(316 251) scale(${cupScale}) translate(-316 -251)`}
+                transform={`translate(${cupX} ${cupY}) rotate(${cupAngle} 316 251) translate(316 251) scale(${cupScaleX} ${cupScale}) translate(-316 -251)`}
               >
                 <Path
                   d={beverage === "juice"
@@ -1062,7 +1085,9 @@ export default function CapyScene({
             ease((elapsed - 2180) / 1400) * ease((6600 - elapsed) / 1500);
           const tilt =
             ease((elapsed - 3800) / 850) * ease((5800 - elapsed) / 850);
-          const water = mix(startWater, endWater, ease((elapsed - 4300) / 1050));
+          const water = mix(startWater, endWater, beverage === "juice"
+            ? ease((elapsed - 4050) / 900)
+            : ease((elapsed - 4300) / 1050));
           remainingWater.current = water;
           // Blink twice after reaching the ledge, then sip.
           const eyesClosed =
