@@ -6,7 +6,7 @@ export function createGardenDemo(now = new Date()) {
     return seed / 4294967296;
   };
   const entries = [];
-  for (let offset = 89; offset >= 0; offset--) {
+  for (let offset = 27; offset >= 0; offset--) {
     const date = new Date(now);
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() - offset);

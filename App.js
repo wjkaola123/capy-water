@@ -9,6 +9,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -18,7 +19,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import Feather from "@expo/vector-icons/Feather";
-import Svg, { Circle, Path, Defs, ClipPath, Ellipse } from "react-native-svg";
+import Svg, { Circle, Path, Defs, ClipPath, Ellipse, LinearGradient, Stop, Rect, RadialGradient } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import CapyScene, { CapyAvatar, CapyEffectIcon, CapyBeverageIcon, CapyStartupIllustration } from "./src/CapyScene";
 import {
@@ -29,14 +30,15 @@ import {
   totalForDay,
   validAmount,
   waterGardenData,
+  weeklyWaterGarden,
   dayKey,
 } from "./src/hydration";
 import { useHydration } from "./src/useHydration";
-import { createGardenDemo } from "./src/gardenDemo";
 import { applyReminders, reminderPermission } from "./src/reminders";
 import { C, s } from "./src/styles";
 
 const MotionContext = React.createContext(true);
+const STARTUP_MIN_DURATION_MS = 1800;
 const WATER_TOPICS = [
   "今天，也要好好喝水",
   "喝一口水，歇一小会儿",
@@ -252,164 +254,161 @@ function GardenPlant({ height = 44, size = 32 }) {
   );
 }
 
-const AnimatedWaterPath = Animated.createAnimatedComponent(Path);
 
-function JourneyWater({ index, level, amount, chosen, tide, motion }) {
-  const clipId = `bay-${index}`;
-  const paths = React.useMemo(() => {
-    const inputRange = [0, 0.25, 0.5, 0.75, 1];
-    const surfaces = inputRange.map((step) => {
-      const phase = step * Math.PI * 2 + index * 0.85;
-      const y = level + (motion ? Math.sin(phase) * 1.3 : 0);
-      const bend = motion ? Math.cos(phase) * 2.2 : 0;
-      return `M0 ${y} Q15 ${y - bend} 30 ${y} T60 ${y}`;
-    });
-    return {
-      water: tide.interpolate({ inputRange, outputRange: surfaces.map((path) => `${path} L60 48 L0 48 Z`) }),
-      ripple: tide.interpolate({ inputRange, outputRange: surfaces }),
-    };
-  }, [index, level, tide, motion]);
-  return (
-    <Svg width={60} height={46} viewBox="0 0 60 46" aria-hidden={true}>
-      <Defs><ClipPath id={clipId}><Ellipse cx="30" cy="24" rx="27" ry="19" /></ClipPath></Defs>
-      <Ellipse cx="30" cy="24" rx="27" ry="19" fill="#f7f8f2" stroke={chosen ? C.green : "#cddcc2"} strokeWidth={chosen ? 2 : 1} />
-      {amount > 0 && <>
-        <AnimatedWaterPath d={paths.water} fill="#83b39d" clipPath={`url(#${clipId})`} />
-        <AnimatedWaterPath d={paths.ripple} stroke="#fff" opacity={0.65} fill="none" clipPath={`url(#${clipId})`} />
-        <Path d="M37 13 Q47 5 51 11 Q46 19 37 13Z" fill="#54764f" />
-      </>}
-    </Svg>
-  );
-}
 
-function QuarterJourney({ days, selected, onSelect }) {
+const AnimatedPondWater = Animated.createAnimatedComponent(Path);
+
+function WeeklyWalk({ entries, now, selectedKey, onSelect }) {
   const motion = React.useContext(MotionContext);
+  const weeks = weeklyWaterGarden(entries, now);
+  const selected = Math.max(0, weeks.findIndex((week) => week.days.some((day) => day.key === selectedKey)));
+  const position = useRef(new Animated.Value(selected)).current;
+  const step = useRef(new Animated.Value(0)).current;
+  const stride = useRef(new Animated.Value(0)).current;
   const tide = useRef(new Animated.Value(0)).current;
+  const currentPosition = useRef(selected);
+  const [mapWidth, setMapWidth] = useState(0);
+  const [facing, setFacing] = useState(1);
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
   useEffect(() => {
-    let animation;
-    const update = (status) => {
-      animation?.stop();
-      tide.setValue(0);
-      if (!motion || status !== "active") return;
-      animation = Animated.loop(Animated.timing(tide, {
-        toValue: 1,
-        duration: 5200,
-        easing: Easing.linear,
-        // SVG 路径形变不支持 native driver；所有水面共用一个动画时钟。
-        useNativeDriver: false,
-        isInteraction: false,
-      }));
-      animation.start();
-    };
-    update(AppState.currentState);
-    const subscription = AppState.addEventListener("change", update);
-    return () => { animation?.stop(); subscription.remove(); };
-  }, [motion, tide]);
-  const bays = Array.from({ length: Math.ceil(days.length / 7) }, (_, index) => {
-    const week = days.slice(index * 7, index * 7 + 7);
-    return { days: week, amount: week.reduce((sum, day) => sum + day.amount, 0) };
-  });
-  const active = bays.findIndex((bay) => bay.days.some((day) => day.key === selected.key));
-  const current = bays[active];
-  const max = Math.max(...bays.map((bay) => bay.amount), 1);
+    tide.setValue(0);
+    if (!motion || !foreground) return;
+    // 四个水塘共用慢时钟；SVG 路径形变使用 JS driver。
+    const ripples = Animated.loop(Animated.timing(tide, {
+      toValue: 1, duration: 6200, easing: Easing.linear,
+      useNativeDriver: false, isInteraction: false,
+    }));
+    ripples.start();
+    return () => ripples.stop();
+  }, [motion, foreground, tide]);
+  useEffect(() => {
+    const listener = AppState.addEventListener("change", (state) => setForeground(state === "active"));
+    const id = position.addListener(({ value }) => { currentPosition.current = value; });
+    return () => { listener.remove(); position.removeListener(id); };
+  }, [position]);
+  useEffect(() => {
+    position.stopAnimation();
+    step.stopAnimation();
+    stride.stopAnimation();
+    step.setValue(0);
+    const distance = Math.abs(selected - currentPosition.current);
+    if (!motion || !foreground || distance < .01) {
+      stride.setValue(0);
+      position.setValue(selected);
+      return;
+    }
+    setFacing(selected > currentPosition.current ? 1 : -1);
+    const driver = Platform.OS !== "web";
+    const footsteps = Animated.loop(Animated.timing(step, { toValue: 1, duration: 440, easing: Easing.linear, useNativeDriver: driver, isInteraction: false }));
+    Animated.timing(stride, { toValue: 1, duration: 120, useNativeDriver: driver, isInteraction: false }).start();
+    const walk = Animated.timing(position, { toValue: selected, duration: 450 + distance * 430, easing: Easing.inOut(Easing.sin), useNativeDriver: driver, isInteraction: false });
+    footsteps.start();
+    walk.start(({ finished }) => {
+      if (!finished) return;
+      Animated.timing(stride, { toValue: 0, duration: 170, easing: Easing.out(Easing.quad), useNativeDriver: driver, isInteraction: false }).start(({ finished: settled }) => {
+        if (settled) { footsteps.stop(); step.setValue(0); }
+      });
+    });
+    return () => { walk.stop(); footsteps.stop(); step.stopAnimation(); stride.stopAnimation(); };
+  }, [selected, motion, foreground, position, step, stride]);
+  const ceiling = Math.max(500, Math.ceil(Math.max(...weeks.map((week) => week.average)) / 500) * 500);
   const shortDate = (day) => `${day.date.getMonth() + 1}.${day.date.getDate()}`;
   return (
-    <View>
-      <View style={s.journeyHeading}>
-        <Icon name="navigation" size={18} />
-        <Text style={s.journeyTitle}>水分漂流记</Text>
-        <Text style={s.journeyUnit}>每湾最多 7 天 · 单位 L</Text>
-      </View>
-      <Text style={s.journeyHint}>顺着小溪逛一逛，水湾越满，记录水量越多。</Text>
-      <View style={s.journeyMap}>
-        {Array.from({ length: Math.ceil(bays.length / 4) }, (_, row) => (
-          <View key={row} style={[s.journeyRow, row % 2 === 1 && { flexDirection: "row-reverse" }]}>
-            {bays.slice(row * 4, row * 4 + 4).length > 1 && <View pointerEvents="none" style={s.journeyStream} />}
-            {row < Math.ceil(bays.length / 4) - 1 && <View pointerEvents="none" style={[s.journeyTurn, row % 2 === 0 ? { right: "12.5%" } : { left: "12.5%" }]} />}
-            {bays.slice(row * 4, row * 4 + 4).map((bay, column) => {
-              const index = row * 4 + column;
-              const chosen = index === active;
-              const level = bay.amount ? 43 - (bay.amount / max) * 34 : 45;
-              return (
-                <Pressable key={index} accessibilityRole="button"
-                  accessibilityLabel={`第${index + 1}湾，${shortDate(bay.days[0])}至${shortDate(bay.days.at(-1))}，记录${bay.amount}毫升`}
-                  accessibilityState={{ selected: chosen }} aria-pressed={chosen}
-                  onPress={() => onSelect(bay.days.at(-1).key)} style={[s.journeyBay, chosen && s.journeyBaySelected]}>
-                  <Text style={[s.journeyBayName, chosen && { color: C.green }]}>{index === bays.length - 1 ? "这一湾 · 今天" : `第 ${index + 1} 湾`}</Text>
-                  <JourneyWater index={index} level={level} amount={bay.amount} chosen={chosen} tide={tide} motion={motion} />
-                  <Text style={s.journeyAmount}>{bay.amount ? (bay.amount / 1000).toFixed(1) : "—"}</Text>
-                </Pressable>
-              );
+    <View style={{ marginTop: 16 }}>
+      <SectionTitle title="卡皮的补水散步图" icon="map" />
+      <View style={s.walkMap} onLayout={(event) => setMapWidth(event.nativeEvent.layout.width)}>
+        <View pointerEvents="none" style={s.walkTrail} />
+        <Animated.View pointerEvents="none" accessible={false} style={[s.walkCapy, {
+          transform: [{ translateX: position.interpolate({ inputRange: [0, 3], outputRange: [mapWidth / 8 - 20, mapWidth * 7 / 8 - 20] }) }],
+        }]}>
+          <Animated.View style={{ width: 40, height: 40, transform: [{ scaleX: facing }] }}>
+            {[{ x: 21, front: false, far: true }, { x: 45, front: true, far: true }, { x: 16, front: false, far: false }, { x: 40, front: true, far: false }].map(({ x, front, far }) => {
+              // 同侧前后脚反相，对角脚同相；向前摆腿时抬脚，落地后向后蹬。
+              const opposite = front === far;
+              const swing = Animated.multiply(stride, step.interpolate({ inputRange: [0, .25, .5, .75, 1], outputRange: opposite ? [0, 28, 0, -28, 0] : [0, -28, 0, 28, 0] }));
+              const lift = Animated.multiply(stride, step.interpolate({ inputRange: [0, .125, .25, .375, .5, .625, .75, .875, 1], outputRange: opposite ? [0, 0, 0, 0, 0, -1.4, -2, -1.4, 0] : [0, -1.4, -2, -1.4, 0, 0, 0, 0, 0] }));
+              return <Animated.View key={x} style={{ position: "absolute", left: 0, top: 0, width: 40, height: 40, transformOrigin: [x * 40 / 64, 44 * 40 / 64, 0], transform: [{ translateY: lift }, { rotate: swing.interpolate({ inputRange: [-28, 28], outputRange: ["-28deg", "28deg"] }) }] }}>
+                <Svg width={40} height={40} viewBox="0 0 64 64" aria-hidden={true}>
+                  <Path d={`M${x} 43 Q${x - 1} 48 ${x} 53 L${x + 5} 54`} stroke={far ? "#815d41" : "#ad7d54"} strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </Svg>
+              </Animated.View>;
             })}
-          </View>
-        ))}
+            <Animated.View style={{ transform: [{ translateY: Animated.multiply(stride, step.interpolate({ inputRange: [0, .25, .5, .75, 1], outputRange: [0, -1.1, 0, -1.1, 0] })) }] }}>
+            <Svg width={40} height={40} viewBox="0 0 64 64" aria-hidden={true}>
+              <Ellipse cx="28" cy="36" rx="23" ry="16" fill="#cca074" />
+              <Path d="M32 21 Q42 14 51 23 L60 30 Q64 40 55 43 L37 43 Q27 37 32 21Z" fill="#cca074" />
+              <Circle cx="37" cy="21" r="5" fill="#ad7d54" /><Circle cx="37" cy="21" r="2.5" fill="#e7b9ae" />
+              <Circle cx="50" cy="29" r="1.8" fill="#815d41" />
+              <Path d="M59 34 h2 M53 39 q4 2 7 -1" fill="none" stroke="#815d41" strokeWidth="1.5" strokeLinecap="round" />
+              <Path d="M37 6 Q33 8 32 13 Q31 20 40 20 Q49 20 48 13 Q47 8 43 6Z" fill="#edbc65" stroke="#d89034" strokeWidth="1" />
+              <Path d="M35 12 Q35 9 38 9" fill="none" stroke="#f5e5b3" strokeWidth="2" strokeLinecap="round" />
+              <Path d="M40 6 Q40 3 42 2" fill="none" stroke="#647c46" strokeWidth="1.5" strokeLinecap="round" />
+            </Svg>
+            </Animated.View>
+          </Animated.View>
+        </Animated.View>
+        <View style={s.walkPonds}>
+          {weeks.map((item, index) => {
+            const clip = `weekly-pond-${index}`;
+            const level = 60 - item.average / ceiling * 45;
+            const waterPath = (phase) => {
+              const bend = motion && foreground ? Math.sin(phase * Math.PI * 2 + index * .8) * 2.4 : 0;
+              return `M0 ${level} C13 ${level + bend} 27 ${level + bend} 40 ${level} C53 ${level - bend} 67 ${level - bend} 80 ${level} V70 H0Z`;
+            };
+            return (
+              <Pressable key={item.days[0].key} accessibilityRole="button"
+                accessibilityLabel={`${shortDate(item.days[0])}至${shortDate(item.days[6])}，日均记录${item.average}毫升，记录${item.recordedDays}天`}
+                accessibilityState={{ selected: selected === index }} aria-pressed={selected === index}
+                onPress={() => onSelect(item.days[6].key)} style={[s.walkPond, selected === index && s.walkPondSelected]}>
+                <Text style={s.walkWeek}>{index === 3 ? "最近一周" : `第 ${index + 1} 周`}</Text>
+                <Svg width="100%" height={75} viewBox="0 0 80 80" aria-hidden={true}>
+                  <Defs><ClipPath id={clip}><Ellipse cx="40" cy="38" rx="34" ry="25" /></ClipPath></Defs>
+                  <Ellipse cx="40" cy="38" rx="34" ry="25" fill="#f7f8f2" stroke={selected === index ? "#54764f" : "#cddcc2"} strokeWidth="2" />
+                  {!!item.recordedDays && <AnimatedPondWater clipPath={`url(#${clip})`} d={tide.interpolate({
+                    inputRange: Array.from({ length: 17 }, (_, frame) => frame / 16),
+                    outputRange: Array.from({ length: 17 }, (_, frame) => waterPath(frame / 16)),
+                  })} fill="#83b39d" />}
+                  <Path d="M53 20 Q57 10 69 15 Q66 25 53 20Z" fill="#54764f" />
+                  <Path d="M54 20 L65 16" stroke="#8fab7d" strokeWidth=".9" strokeLinecap="round" />
+                  {Array.from({ length: item.recordedDays }, (_, flower) => {
+                    const x = 12 + flower * 9;
+                    return <React.Fragment key={flower}>
+                      <Path d={`M${x} 76 v-6`} stroke="#54764f" strokeWidth="1.2" />
+                      <Circle cx={x - 2} cy="69" r="2.4" fill="#e7b9ae" /><Circle cx={x + 2} cy="69" r="2.4" fill="#e7b9ae" /><Circle cx={x} cy="66" r="2.4" fill="#e7b9ae" /><Circle cx={x} cy="69" r="1.5" fill="#eea342" />
+                    </React.Fragment>;
+                  })}
+                </Svg>
+                <Text style={s.walkAmount}>{item.recordedDays ? item.average.toLocaleString() : "—"}</Text>
+                <Text style={s.walkSmall}>日均 ml</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
-      <View style={s.journeyWeekHeader}>
-        <Text style={s.journeyWeekTitle}>{shortDate(current.days[0])} — {shortDate(current.days.at(-1))}</Text>
-      </View>
-      <View style={s.journeyDays}>
-        {current.days.map((day) => (
-          <Pressable key={day.key} accessibilityRole="button" accessibilityLabel={`${day.key}，${day.cups ? `${day.amount}毫升，${day.cups}杯` : "未记录"}`}
-            accessibilityState={{ selected: day.key === selected.key }} aria-pressed={day.key === selected.key}
-            onPress={() => onSelect(day.key)} style={[s.journeyDay, day.key === selected.key && s.journeyDaySelected]}>
-            <Text style={s.gardenDate}>{day.date.getDate()}日</Text>
-            <Icon name={day.cups ? "droplet" : "minus"} size={13} color={day.cups ? C.green : C.muted} />
-          </Pressable>
-        ))}
-      </View>
+
     </View>
   );
 }
 
 function WaterGarden({ entries, now }) {
-  const [range, setRange] = useState(7);
+  const [rangeValue, setRange] = useState(7);
+  const range = rangeValue === 28 || rangeValue === 30 ? 28 : 7;
   const [selectedKey, setSelectedKey] = useState(null);
-  const [demo, setDemo] = useState(() => __DEV__ && Platform.OS === "web" && new URLSearchParams(window.location.search).get("gardenDemo") === "1");
-  const demoEntries = React.useMemo(() => __DEV__ ? createGardenDemo(now) : [], [dayKey(now)]);
-  const data = waterGardenData(demo ? demoEntries : entries, range, now);
+  const data = waterGardenData(entries, range, now);
   const selected = data.days.find((day) => day.key === selectedKey) || data.days.at(-1);
   const todayKey = dayKey(now);
   const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
-  const cells = [ ...Array(data.days[0].date.getDay()).fill(null), ...data.days ];
-  while (cells.length % 7) cells.push(null);
-  const weeks = Array.from({ length: cells.length / 7 }, (_, index) => cells.slice(index * 7, index * 7 + 7));
-  const renderDay = (day, index = 0) => day ? (
-    <Pressable
-      key={day.key}
-      accessibilityRole="button"
-      accessibilityLabel={`${day.key}，${day.cups ? `${day.amount}毫升，${day.cups}杯` : "未记录"}${day.key === todayKey ? "，今天" : ""}`}
-      accessibilityState={{ selected: day.key === selected.key }}
-      aria-pressed={day.key === selected.key}
-      onPress={() => setSelectedKey(day.key)}
-      style={[s.gardenDay, day.cups > 0 && s.gardenDayRecorded, day.key === selected.key && s.gardenDaySelected]}
-    >
-      {day.key === todayKey ? <Icon name="sun" size={18} color="#eea342" />
-        : day.cups > 0 ? <Icon name="feather" size={17} color={C.green} />
-        : <View style={s.gardenSoil} />}
-      <Text style={s.gardenDate}>{day.date.getDate()}</Text>
-    </Pressable>
-  ) : <View key={`blank-${index}`} style={[s.gardenDay, { backgroundColor: "transparent" }]} />;
   return (
     <View style={s.card}>
       <SectionTitle title="卡皮的水分花园" icon="feather" />
-      <Text style={s.beverageHint}>每一口水，都在这里留下小小的绿意。</Text>
-      {__DEV__ && (
-        <View style={s.gardenDemoBanner}>
-          <Text style={s.gardenDemoText}>{demo ? "正在预览 90 天演示数据，仅用于这块花园，不计入真实记录。" : "想看看花园长满后的样子？"}</Text>
-          <Pressable accessibilityRole="button" onPress={() => { setDemo((value) => !value); setSelectedKey(null); }} style={s.gardenDemoButton}>
-            <Text style={s.gardenDemoButtonText}>{demo ? "查看真实数据" : "预览演示数据"}</Text>
-          </Pressable>
-        </View>
-      )}
       <View style={s.gardenRanges} accessibilityRole="radiogroup" accessibilityLabel="统计时间范围">
-        {[7, 30, 90].map((value) => (
-          <Pressable key={value} accessibilityRole="radio" accessibilityLabel={`近${value}天`} accessibilityState={{ checked: range === value }} aria-checked={range === value}
+        {[7, 28].map((value) => (
+          <Pressable key={value} accessibilityRole="radio" accessibilityLabel={value === 28 ? "近4周" : "近7天"} accessibilityState={{ checked: range === value }} aria-checked={range === value}
             onPress={() => { setRange(value); setSelectedKey(null); }} style={[s.gardenRange, range === value && s.gardenRangeActive]}>
-            <Text style={[s.gardenRangeText, range === value && { color: C.green, fontWeight: "700" }]}>近 {value} 天</Text>
+            <Text style={[s.gardenRangeText, range === value && { color: C.green, fontWeight: "700" }]}>{value === 28 ? "近 4 周" : "近 7 天"}</Text>
           </Pressable>
         ))}
       </View>
-      <Text style={s.gardenPeriod}>{data.days[0].key.replaceAll("-", ".")} — {data.days.at(-1).key.replaceAll("-", ".")}</Text>
       {range === 7 ? (
         <View style={s.gardenWeek}>
           {data.days.map((day) => (
@@ -423,31 +422,13 @@ function WaterGarden({ entries, now }) {
             </Pressable>
           ))}
         </View>
-      ) : range === 30 ? (
-        <View style={{ gap: 5 }}>
-          <View style={s.gardenCalendarRow}>{weekdays.map((label) => <Text key={label} style={s.gardenWeekday}>{label}</Text>)}</View>
-          {weeks.map((week, index) => <View key={index} style={s.gardenCalendarRow}>{week.map((day, dayIndex) => renderDay(day, dayIndex))}</View>)}
-        </View>
       ) : (
-        <QuarterJourney days={data.days} selected={selected} onSelect={setSelectedKey} />
+        <WeeklyWalk entries={entries} now={now} selectedKey={selected.key} onSelect={setSelectedKey} />
       )}
-      {range !== 90 && <View style={s.gardenLegend}>
-        <Icon name="feather" size={12} /><Text style={s.tiny}>有记录</Text>
-        <View style={s.gardenSoil} /><Text style={s.tiny}>未记录</Text>
-        <Icon name="sun" size={12} color="#eea342" /><Text style={s.tiny}>今天</Text>
-      </View>}
-      <View style={s.gardenDetail} accessibilityLiveRegion="polite">
+      {range === 7 && <View style={s.gardenDetail} accessibilityLiveRegion="polite">
         <Text style={s.gardenDetailDate}>{selected.key}</Text>
         <Text style={s.gardenDetailText}>{selected.cups ? `${selected.amount.toLocaleString()} ml · ${selected.cups} 杯` : "这一天还没有记录"}</Text>
-      </View>
-      <View style={s.gardenSummary}>
-        {[[`${data.total.toLocaleString()} ml`, "累计记录水量"], [`${data.recordedDays} 天`, "有记录的日子"], [`${data.average.toLocaleString()} ml`, "记录日平均"]].map(([value, label]) => (
-          <View key={label} style={s.gardenSummaryItem}>
-            <Text style={s.gardenSummaryValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
-            <Text style={s.gardenSummaryLabel}>{label}</Text>
-          </View>
-        ))}
-      </View>
+      </View>}
     </View>
   );
 }
@@ -501,25 +482,102 @@ function ToastMessage({ toast, motion, desktop, onUndo, onDismiss }) {
   );
 }
 
-function StartupScreen() {
+function StartupScreen({ ready = false, motion = false, mobilePreview = false }) {
+  const backdropId = `startup-${React.useId().replace(/:/g, "")}`;
+  const [allowMotion, setAllowMotion] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
+      if (mounted) setAllowMotion(!reduced);
+    }).catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", (reduced) => setAllowMotion(!reduced));
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+  const previewMotion = __DEV__ && Platform.OS === "web" &&
+    new URLSearchParams(window.location.search).get("previewMotion") === "1";
   return (
-    <SafeAreaView style={s.loading}>
+    <SafeAreaView style={[s.loading, mobilePreview && s.mobilePreviewFrame]}>
       <StatusBar style="dark" />
+      <View pointerEvents="none" style={StyleSheet.absoluteFill} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Svg width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="none">
+          <Defs>
+            <LinearGradient id={`${backdropId}-wash`} x1="0" y1="0" x2="0.8" y2="1">
+              <Stop offset="0" stopColor="#e8eeda" stopOpacity="0.6" />
+              <Stop offset="0.48" stopColor="#f7f8f2" stopOpacity="0" />
+              <Stop offset="1" stopColor="#e8eeda" stopOpacity="0.45" />
+            </LinearGradient>
+            <RadialGradient id={`${backdropId}-light`} cx="0.16" cy="0.12" rx="0.72" ry="0.36">
+              <Stop offset="0" stopColor="#eea342" stopOpacity="0.09" />
+              <Stop offset="1" stopColor="#eea342" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          <Rect width="390" height="844" fill={`url(#${backdropId}-wash)`} />
+          <Rect width="390" height="844" fill={`url(#${backdropId}-light)`} />
+          <Path d="M0 638 C92 588 191 713 390 620 L390 844 H0Z" fill="#e8eeda" opacity="0.6" />
+          <Path d="M0 746 C127 664 233 795 390 707 L390 844 H0Z" fill="#83b39d" opacity="0.1" />
+          <Path d="M0 760 C128 681 240 806 390 724" fill="none" stroke="#f7f8f2" strokeWidth="1.5" opacity="0.7" />
+        </Svg>
+      </View>
       <ScrollView contentContainerStyle={s.startupContent}>
-        <View style={s.startupMain}>
-          <Text style={s.startupTitle} accessibilityRole="header">卡皮补水站</Text>
-          <Text style={s.startupTagline}>喝一口水，歇一小会儿</Text>
+        <View style={s.startupMain} accessibilityRole="progressbar" accessibilityLabel={ready ? "正在进入喝水小院" : "正在读取饮水记录"} accessibilityState={{ busy: true }}>
           <View style={s.startupArt} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <CapyStartupIllustration />
-          </View>
-          <View accessibilityRole="progressbar" accessibilityLabel="正在读取饮水记录" accessibilityState={{ busy: true }} style={s.startupStatus}>
-            <View style={s.startupDrop} />
-            <Text style={s.startupStatusText}>正在翻开你的饮水手记…</Text>
+            <CapyStartupIllustration motion={ready && motion && (allowMotion || previewMotion)} />
           </View>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function GoalSlider({ value, onChange }) {
+  const [width, setWidth] = useState(0);
+  const origin = useRef(0);
+  const fraction = (value - 500) / 4500;
+  const change = (next) => onChange(String(Math.max(500, Math.min(5000, next))));
+  const fromPosition = (x) => {
+    if (width > 32) change(500 + Math.round(Math.max(0, Math.min(1, (x - 16) / (width - 32))) * 90) * 50);
+  };
+  return <View style={{ marginVertical: 16 }}>
+    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
+      <Text style={s.amountInput}>{value}</Text>
+      <Text style={s.amountUnit}>ml / 天</Text>
+    </View>
+    <View
+      accessibilityRole="adjustable"
+      accessibilityLabel="每日饮水目标"
+      accessibilityValue={{ min: 500, max: 5000, now: value, text: `${value} 毫升` }}
+      accessibilityActions={[{ name: "increment", label: "增加50毫升" }, { name: "decrement", label: "减少50毫升" }]}
+      onAccessibilityAction={({ nativeEvent }) => change(value + (nativeEvent.actionName === "increment" ? 50 : -50))}
+      {...(Platform.OS === "web" ? { tabIndex: 0, "aria-valuemin": 500, "aria-valuemax": 5000, "aria-valuenow": value, "aria-valuetext": `${value} 毫升`, onKeyDown: (event) => {
+        const delta = { ArrowRight: 50, ArrowUp: 50, ArrowLeft: -50, ArrowDown: -50, PageUp: 500, PageDown: -500 }[event.key];
+        if (delta !== undefined || event.key === "Home" || event.key === "End") {
+          event.preventDefault();
+          change(event.key === "Home" ? 500 : event.key === "End" ? 5000 : value + delta);
+        }
+      } } : {})}
+      onLayout={({ nativeEvent }) => setWidth(nativeEvent.layout.width)}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => false}
+      onResponderGrant={({ nativeEvent }) => {
+        origin.current = nativeEvent.pageX - nativeEvent.locationX;
+        fromPosition(nativeEvent.locationX);
+      }}
+      onResponderMove={({ nativeEvent }) => fromPosition(nativeEvent.pageX - origin.current)}
+      style={{ height: 48, justifyContent: "center", ...(Platform.OS === "web" ? { touchAction: "none", cursor: "pointer" } : {}) }}
+    >
+      <View pointerEvents="none" style={{ height: 8, marginHorizontal: 16, borderRadius: 4, backgroundColor: "#e8eeda" }}>
+        <View style={{ width: `${fraction * 100}%`, height: 8, borderRadius: 4, backgroundColor: C.green }} />
+      </View>
+      <View pointerEvents="none" style={{ position: "absolute", left: Math.max(0, width - 32) * fraction, width: 32, height: 32, borderRadius: 16, backgroundColor: C.green, borderWidth: 4, borderColor: "#ffffff" }} />
+    </View>
+    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+      <Text style={s.tiny}>500 ml</Text><Text style={s.tiny}>5000 ml</Text>
+    </View>
+  </View>;
 }
 
 function AppContent() {
@@ -533,13 +591,18 @@ function AppContent() {
     now,
     refreshTime,
   } = useHydration();
+  const [startupElapsed, setStartupElapsed] = useState(false);
+  useEffect(() => {
+    // 与存储读取并行，只在本次启动计时；切页、恢复前台和重试不重新等待。
+    const timer = setTimeout(() => setStartupElapsed(true), STARTUP_MIN_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, []);
   const windowSize = useWindowDimensions();
   const mobilePreview = __DEV__ && Platform.OS === "web";
   const width = mobilePreview ? Math.min(windowSize.width, 390) : windowSize.width;
   const desktop = width >= 1040,
     columns = width >= 760;
   const [page, setPage] = useState("home"),
-    [selected, setSelected] = useState(250),
     [modal, setModal] = useState(null);
   const [topicIndex, setTopicIndex] = useState(0);
   const [drinkRun, setDrinkRun] = useState(0);
@@ -562,7 +625,7 @@ function AppContent() {
   const total = totalForDay(state.entries, now),
     today = entriesForDay(state.entries, now),
     days = companionDays(state.entries),
-    motion = state.motion && (previewMotion || !reduceMotion);
+    motion = previewMotion || !reduceMotion;
   const showToast = (message, id = null) => {
     setToast({ message, id });
   };
@@ -779,18 +842,16 @@ function AppContent() {
     );
   const previewStartup = __DEV__ && Platform.OS === "web" &&
     new URLSearchParams(window.location.search).get("previewStartup") === "1";
-  if (!ready || previewStartup) return <StartupScreen />;
+  // 读取失败时优先展示主页的错误提示和重试入口。
+  if (!ready || (!startupElapsed && !storageError) || previewStartup) {
+    return <StartupScreen ready={ready && !storageError} motion={motion} mobilePreview={mobilePreview} />;
+  }
   return (
     <MotionContext.Provider value={motion}>
       <SafeAreaView
         style={[
           s.safe,
-          mobilePreview && {
-            width: "100%",
-            maxWidth: 390,
-            maxHeight: 844,
-            alignSelf: "center",
-          },
+          mobilePreview && s.mobilePreviewFrame,
         ]}
         edges={["top", "bottom"]}
       >
@@ -914,16 +975,6 @@ function AppContent() {
                         />
                       </View>
                     </View>
-                    <View style={s.speech}>
-                      <View style={s.speechTriangle} />
-                      <Icon name="message-circle" size={18} color="#93a27e" />
-                      <Text
-                        accessibilityLiveRegion="polite"
-                        style={s.speechText}
-                      >
-                        {speech}
-                      </Text>
-                    </View>
                     {!columns && (
                       <View style={s.mobileProgress}>
                         <View style={s.rowBetween}>
@@ -937,12 +988,6 @@ function AppContent() {
                               / {state.goal.toLocaleString()} ml
                             </Text>
                           </View>
-                          <Pressable
-                            accessibilityRole="button"
-                            onPress={openGoal}
-                          >
-                            <Text style={s.link}>调整目标</Text>
-                          </Pressable>
                         </View>
                         <View style={s.mobileTrack}>
                           <View
@@ -954,70 +999,34 @@ function AppContent() {
                             ]}
                           />
                         </View>
-                        {total >= state.goal && (
-                          <Text style={s.tiny}>已达标，按口渴感喝水就好。</Text>
-                        )}
                       </View>
                     )}
                     <View style={s.drinkCard}>
-                      <SectionTitle
-                        title="来，喝一杯吧"
-                        action="自定义水量"
-                        onAction={openCustom}
-                      />
                       <View style={s.cupOptions}>
                         {[150, 250, 350, 500].map((amount, i) => (
                           <Pressable
                             key={amount}
-                            accessibilityRole="radio"
-                            accessibilityLabel={`${amount} 毫升`}
-                            accessibilityState={{
-                              checked: selected === amount,
-                            }}
-                            aria-checked={selected === amount}
-                            onPress={() => setSelected(amount)}
-                            style={[
-                              s.cupOption,
-                              selected === amount && s.cupSelected,
-                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`记录 ${amount} 毫升饮水`}
+                            accessibilityState={{ disabled: !canSave }}
+                            disabled={!canSave}
+                            onPress={() => addWater(amount)}
+                            style={({ pressed }) => [s.cupOption, pressed && s.cupSelected, !canSave && { opacity: .45 }]}
                           >
                             <Cup
-                              size={28 + i * 2}
+                              size={36}
                               level={0.35 + i * 0.18}
-                              fill={selected === amount ? "#a9c28d" : "#d8e2cc"}
+                              fill="#a9c28d"
                             />
                             <Text
-                              style={[
-                                s.cupAmount,
-                                selected === amount && { color: C.green },
-                              ]}
+                              style={s.cupAmount}
                             >
                               {amount}
                               <Text style={s.cupUnit}> ml</Text>
                             </Text>
-                            {selected === amount && (
-                              <View style={s.cupCheck}>
-                                <Icon name="check" size={9} color="#fff" />
-                              </View>
-                            )}
                           </Pressable>
                         ))}
                       </View>
-                      <Button
-                        label={`喝好了，记录 ${selected} ml`}
-                        onPress={() => addWater(selected)}
-                        disabled={!canSave}
-                        testID="add-water"
-                        style={s.drinkButton}
-                      >
-                        <View style={s.row}>
-                          <Icon name="plus" size={20} color="#fff" />
-                          <Text style={s.buttonText}>
-                            喝好了，记录 {selected} ml
-                          </Text>
-                        </View>
-                        <Icon name="droplet" size={18} color="#cfddbd" />
-                      </Button>
                     </View>
                     <View style={s.card}>
                       <SectionTitle
@@ -1032,8 +1041,6 @@ function AppContent() {
                       <View style={s.progressCard}>
                         <SectionTitle
                           title="今日水分"
-                          action="调整目标"
-                          onAction={openGoal}
                         />
                         <ProgressRing
                           total={total}
@@ -1110,17 +1117,6 @@ function AppContent() {
               {page === "garden" && (
                 <View style={s.pageStack}>
                   <View style={s.gardenHero}>
-                    <View style={s.rowBetween}>
-                      <View style={s.flex}>
-                        <Text style={s.gardenHeading}>卡皮的温泉小院</Text>
-                      </View>
-                      <View style={s.gardenBadge}>
-                        <Icon name="feather" size={16} />
-                        <Text style={s.link}>
-                          {state.entries.length} 份关心
-                        </Text>
-                      </View>
-                    </View>
                     <View style={s.gardenScene}>
                       <CapyScene
                         paused={!!modal}
@@ -1140,14 +1136,6 @@ function AppContent() {
                               : 1
                         }
                       />
-                    </View>
-                    <View style={s.gardenSpeech}>
-                      <Text
-                        accessibilityLiveRegion="polite"
-                        style={s.speechText}
-                      >
-                        {speech}
-                      </Text>
                     </View>
                   </View>
                   <View style={s.card}>
@@ -1218,12 +1206,7 @@ function AppContent() {
                   </View>
                   <View style={s.card}>
                     <SectionTitle title="给卡皮换个小装扮" icon="smile" />
-                    <View
-                      style={[
-                        s.accessories,
-                        width < 480 && { flexDirection: "column" },
-                      ]}
-                    >
+                    <View style={s.accessories}>
                       {[
                         {
                           id: "orange",
@@ -1242,6 +1225,12 @@ function AppContent() {
                           title: "温泉小毛巾",
                           need: 12,
                           note: "累计记录 12 杯解锁",
+                        },
+                        {
+                          id: "leaf",
+                          title: "清凉小叶帽",
+                          need: 20,
+                          note: "累计记录 20 杯解锁",
                         },
                       ].map((item) => {
                         const unlocked = state.entries.length >= item.need;
@@ -1274,7 +1263,7 @@ function AppContent() {
                               !unlocked && { opacity: 0.65 },
                             ]}
                           >
-                            <CapyAvatar size={85} accessory={item.id} />
+                            <CapyAvatar size={72} accessory={item.id} />
                             <Text style={s.accessoryTitle}>{item.title}</Text>
                             <View style={s.accessoryPill}>
                               <Icon
@@ -1338,44 +1327,9 @@ function AppContent() {
                       <Icon name="chevron-right" size={17} color={C.muted} />
                     </Pressable>
                   </View>
-                  <View style={s.card}>
-                    <SectionTitle title="让陪伴更舒服" icon="heart" />
-                    <View style={s.settingsRow}>
-                      <View style={s.flex}>
-                        <Text style={s.settingTitle}>小院动画</Text>
-                      </View>
-                      <Switch
-                        accessibilityLabel="小院动画"
-                        value={state.motion}
-                        onValueChange={(value) =>
-                          setState((previous) => ({
-                            ...previous,
-                            motion: value,
-                          }))
-                        }
-                        trackColor={{ false: "#dce2d4", true: "#8ba478" }}
-                        thumbColor="#ffffff"
-                      />
-                    </View>
-                    {state.motion && (previewMotion || reduceMotion) && (
-                      <Text style={s.settingFootnote}>
-                        {previewMotion ? "正在预览动画" : "系统已开启减少动态效果"}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={s.privacyCard}>
-                    <View style={s.row}>
-                      <Icon name="lock" size={20} />
-                      <Text style={s.cardTitle}>你的日常，只留在这里</Text>
-                    </View>
-                    <Text style={s.privacyText}>
-                      记录和偏好仅保存在当前设备。卸载 App 或清除浏览器数据会移除记录。
-                    </Text>
-                  </View>
                   <View style={s.about}>
                     <CapyAvatar size={50} />
                     <Text style={s.aboutTitle}>卡皮补水站</Text>
-                    <Text style={s.tiny}>v1.0</Text>
                   </View>
                 </View>
               )}
@@ -1478,36 +1432,7 @@ function AppContent() {
                   </>
                 )}
                 {modal === "goal" && (
-                  <>
-                    <View style={s.amountInputRow}>
-                      <TextInput
-                        autoFocus
-                        accessibilityLabel="每日饮水目标"
-                        keyboardType="number-pad"
-                        value={goalInput}
-                        onChangeText={setGoalInput}
-                        style={s.amountInput}
-                        maxLength={4}
-                        onSubmitEditing={saveGoal}
-                      />
-                      <Text style={s.amountUnit}>ml / 天</Text>
-                    </View>
-                    <View style={s.presetRow}>
-                      {[1500, 2000, 2500].map((value) => (
-                        <Button
-                          key={value}
-                          label={`${value} ml`}
-                          quiet
-                          onPress={() => setGoalInput(String(value))}
-                          style={s.preset}
-                        />
-                      ))}
-                    </View>
-                    <Text style={s.inputHelp}>
-                      可设置 500–5000
-                      ml。按个人需要调整；如有医生给定的饮水量，请以其建议为准。
-                    </Text>
-                  </>
+                  <GoalSlider value={Number(goalInput)} onChange={setGoalInput} />
                 )}
                 {modal === "reminder" && (
                   <>

@@ -9,7 +9,7 @@ test("演示数据可重复，覆盖低水量、高水量、空白和多杯，�
   assert.deepEqual(entries, createGardenDemo(now));
   assert.equal(new Set(entries.map((entry) => entry.id)).size, entries.length);
   assert.ok(entries.every((entry) => validAmount(entry.amount) && new Date(entry.at) <= now));
-  for (const range of [7, 30, 90]) {
+  for (const range of [7, 28]) {
     const result = waterGardenData(entries, range, now);
     assert.ok(result.days.some((day) => day.amount === 0));
     assert.ok(result.days.some((day) => day.amount === 50));

@@ -6,7 +6,6 @@ export const INITIAL_STATE = {
   accessory: "orange",
   effect: "hearts",
   beverage: "tea",
-  motion: true,
   reminder: { enabled: false, interval: 90, start: 8, end: 21 },
 };
 
@@ -54,7 +53,7 @@ export function companionDays(entries) {
 }
 
 export function waterGardenData(entries, range = 7, now = new Date()) {
-  const length = [7, 30, 90].includes(range) ? range : 7;
+  const length = [7, 28].includes(range) ? range : 7;
   const totals = new Map();
   for (const entry of entries) {
     const key = dayKey(entry.at);
@@ -134,10 +133,9 @@ export function restoreHydration(raw) {
       Number.isInteger(input.goal) && input.goal >= 500 && input.goal <= 5000
         ? input.goal
         : 2000,
-    accessory: ["orange", "flower", "towel"].includes(input.accessory)
+    accessory: ["orange", "flower", "towel", "leaf"].includes(input.accessory)
       ? input.accessory
       : "orange",
-    motion: input.motion !== false,
     effect: ["hearts", "stars", "petals"].includes(input.effect)
       ? input.effect
       : "hearts",
@@ -145,4 +143,14 @@ export function restoreHydration(raw) {
       ? input.beverage
       : "tea",
   };
+}
+
+// 最近 28 个本地日期，由早到晚分成四个连续七天周期（不是自然周）。
+export function weeklyWaterGarden(entries, now = new Date()) {
+  const data = waterGardenData(entries, 28, now);
+  return Array.from({ length: 4 }, (_, index) => {
+    const days = data.days.slice(index * 7, index * 7 + 7);
+    const total = days.reduce((sum, day) => sum + day.amount, 0);
+    return { days, total, average: Math.round(total / 7), recordedDays: days.filter((day) => day.cups > 0).length };
+  });
 }

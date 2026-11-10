@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { LADYBUG_CYCLE_MS, LADYBUG_ROUTE } from "./ladybugMotion";
-import { turtleMotion, turtleFootPose, scheduleTurtleTrips, createTurtleTrip } from "./turtleMotion";
+import { createTurtleRoute, turtleMotion, turtleFootPose, scheduleTurtleTrips, createTurtleTrip } from "./turtleMotion";
 import {
   Animated,
   AppState,
@@ -48,13 +48,9 @@ const APPROACH_Y = 20;
 const WATER_PER_SIP = 0.25;
 const CUP_HANDLE = "M272 259 C263 255 254 254 254 263 C254 271 263 274 275 271";
 const JUICE_STRAW_TIP = { x: 308, y: 220 };
-const BIRD_FLAP_PHASES = Array.from({ length: 37 }, (_, index) => index / 36);
-const BIRD_WING_SCALE = BIRD_FLAP_PHASES.map((_, index) =>
-  index % 2 === 0 ? 1 : 0.35,
-);
+const BIRD_ROUTE_PHASES = Array.from({ length: 97 }, (_, index) => index / 96);
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const TURTLE_ROUTE_PHASES = Array.from({ length: 193 }, (_, index) => index / 192);
-const TURTLE_ROUTE = TURTLE_ROUTE_PHASES.map(turtleMotion);
 const LADYBUG_PHASES = LADYBUG_ROUTE.map(({ phase }) => phase);
 
 function EffectMark({ effect }) {
@@ -113,6 +109,85 @@ function SceneryLayer({ frame, wide, origin, opacity, transform, children, overl
   );
 }
 
+// 每趟重新抽取方向、弧度和节奏；采样平滑曲线供原生 Animated 插值。
+function createBirdRoute(wide, delay = 400 + Math.random() * 2000) {
+  const random = (min, max) => min + Math.random() * (max - min);
+  const left = wide ? -65 : 30;
+  const right = wide ? 665 : 570;
+  const reverse = Math.random() < 0.5;
+  const startX = left + random(0, 65);
+  const endX = right - random(0, 65);
+  // 宽屏场景底部对齐且顶部有裁剪，天空路线要留在可见区域。
+  const skyTop = wide ? 96 : -32;
+  const heights = Array.from({ length: 4 }, () => random(skyTop, skyTop + (wide ? 15 : 50)));
+  const wave = random(8, wide ? 12 : 18);
+  const waves = random(0.8, 1.8);
+  const phase = random(0, Math.PI * 2);
+  const duration = random(14500, 22500);
+  const flapCycles = random(16, 23);
+  const glideStart = random(0.3, 0.55);
+  const points = BIRD_ROUTE_PHASES.map((t) => {
+    const u = 1 - t;
+    const x = startX + (endX - startX) * t;
+    const y = u ** 3 * heights[0] + 3 * u ** 2 * t * heights[1]
+      + 3 * u * t ** 2 * heights[2] + t ** 3 * heights[3]
+      + Math.sin(t * Math.PI * 2 * waves + phase) * wave;
+    // 滑翔前后逐渐收放翅膀，避免突然切换姿态。
+    const glide = Math.max(0, 1 - Math.abs(t - glideStart) / 0.13);
+    const flap = 0.68 + 0.32 * Math.cos(t * Math.PI * 2 * flapCycles + phase);
+    return { x: reverse ? left + right - x : x, y, wing: mix(flap, 0.94, glide) };
+  });
+  return { points, duration, delay };
+}
+
+function SkyBird({ index, frame, wide, motion, paused, active }) {
+  const flight = useRef(new Animated.Value(0)).current;
+  const [route, setRoute] = React.useState(() => createBirdRoute(wide, index * 1200));
+  const [scale, setScale] = React.useState(0);
+  const origin = index === 0 ? [360, wide ? 108 : 68] : [379, wide ? 99 : 59];
+  useEffect(() => {
+    flight.setValue(0);
+    if (!motion || paused || !active) return;
+    const animation = Animated.timing(flight, {
+      toValue: 1,
+      duration: route.duration,
+      delay: route.delay,
+      easing: Easing.linear,
+      useNativeDriver: Platform.OS !== "web",
+      isInteraction: false,
+    });
+    animation.start(({ finished }) => {
+      if (finished) setRoute(createBirdRoute(wide));
+    });
+    return () => animation.stop();
+  }, [motion, paused, active, route, flight, wide]);
+  // 宽屏切换时重新规划天空边界；路径位移按场景实际尺寸缩放。
+  useEffect(() => setRoute(createBirdRoute(wide, index * 1200)), [wide, index]);
+  const interpolate = (values) => flight.interpolate({
+    inputRange: BIRD_ROUTE_PHASES,
+    outputRange: values,
+  });
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}
+      onLayout={({ nativeEvent }) => setScale(nativeEvent.layout.width / (wide ? 800 : 600))}>
+      <SceneryLayer frame={frame} wide={wide} origin={origin}
+        opacity={motion ? flight.interpolate({ inputRange: [0, 0.08, 0.9, 1], outputRange: [0, 1, 1, 0] }) : 1}
+        transform={motion ? [
+          { translateX: interpolate(route.points.map(({ x }) => (x - origin[0]) * scale)) },
+          { translateY: interpolate(route.points.map(({ y }) => (y - origin[1]) * scale)) },
+          { scaleY: interpolate(route.points.map(({ wing }) => wing)) },
+        ] : undefined}>
+        <G transform={wide ? "translate(0 40)" : undefined}>
+          <Path
+            d={index === 0 ? "M350 68 Q355 63 360 68 Q365 63 370 68" : "M371 59 Q375 55 379 59 Q383 55 387 59"}
+            stroke="#8da284" strokeWidth="2" strokeLinecap="round" fill="none"
+          />
+        </G>
+      </SceneryLayer>
+    </View>
+  );
+}
+
 function LeafLadybug({ frame, wide, motion, paused, active }) {
   const crawl = useRef(new Animated.Value(0)).current;
   const [step, setStep] = React.useState(0);
@@ -168,7 +243,7 @@ function LeafLadybug({ frame, wide, motion, paused, active }) {
   );
 }
 
-function TurtleBody({ route, feet, response, limbs, enabled, walking }) {
+function TurtleBody({ route, path, feet, response, limbs, enabled, walking }) {
   const values = useRef({ route: 0, feet: 0, response: 0, limbs: 0 });
   const [pose, setPose] = React.useState(values.current);
   useEffect(() => {
@@ -184,7 +259,7 @@ function TurtleBody({ route, feet, response, limbs, enabled, walking }) {
       if (timer) clearInterval(timer);
     };
   }, [route, feet, response, limbs, enabled]);
-  const { angle: bodyAngle, turning } = turtleMotion(pose.route);
+  const { angle: bodyAngle, turning } = turtleMotion(pose.route, path);
   const headAngle = bodyAngle + (turning ? .08 * Math.abs(Math.sin(bodyAngle)) : 0) + .12 * Math.sin(pose.response * Math.PI * 4);
   const direction = Math.cos(bodyAngle);
   const front = Math.abs(Math.sin(bodyAngle));
@@ -249,6 +324,9 @@ function TurtleBody({ route, feet, response, limbs, enabled, walking }) {
 
 // 与场景使用同一坐标系，宽屏时也留在池沿下方；互动不触发摸头。
 function PondNeighbor({ kind, wide, motion, paused, active }) {
+  const [turtlePath, setTurtlePath] = React.useState(() => createTurtleRoute());
+  const lastTurtlePath = useRef(turtlePath);
+  const turtlePoints = React.useMemo(() => TURTLE_ROUTE_PHASES.map((phase) => turtleMotion(phase, turtlePath)), [turtlePath]);
   const idle = useRef(new Animated.Value(0)).current;
   const feet = useRef(new Animated.Value(0)).current;
   const [layoutWidth, setLayoutWidth] = React.useState(0);
@@ -279,7 +357,11 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
       idle.setValue(0);
       const cancel = scheduleTurtleTrips({ startTrip: (done) => {
         idle.setValue(0);
+        const path = createTurtleRoute(Math.random, lastTurtlePath.current);
+        lastTurtlePath.current = path;
+        setTurtlePath(path);
         const trip = createTurtleTrip({
+          duration: path.duration,
           initiallyHeld: sheltered.current,
           onWalking: setWalking,
           stop: (save) => idle.stopAnimation(save),
@@ -333,7 +415,7 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
     gait.start();
     return () => gait.stop();
   }, [enabled, turtle, feet, walking]);
-  // 以实际显示宽度换算场景坐标，终点落在池前中央 x=300。
+  // 以实际显示宽度换算场景坐标，随机路线保持在池前空地内。
   const sceneScale = layoutWidth / 87;
   const react = (event) => {
     event.stopPropagation();
@@ -360,10 +442,10 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
     }
     response.setValue(0);
     if (!peck) {
-      // 整只小鸟原地轻跳两次；头部不再叠加点击时的点头动作。
+      // 先蓄力再跳，第二跳更轻；落地留出缓冲时间。
       responseRun.current = Animated.timing(response, {
         toValue: 1,
-        duration: 680,
+        duration: 960,
         easing: Easing.linear,
         useNativeDriver: Platform.OS !== "web",
       });
@@ -380,6 +462,13 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
     responseRun.current.start();
   };
   const peckPhases = [0, .12, .28, .34, .5, .62, .76, .82, 1];
+  // 等时间采样抛物线：起落快、顶点慢，避免折线式匀速升降。
+  const hopPhases = [0, .09, .13, .17, .21, .25, .29, .33, .37, .41, .47, .54, .58, .62, .66, .70, .74, .78, .82, .88, 1];
+  const hopHeight = [0, 0, 0, -3.5, -6, -7.5, -8, -7.5, -6, -3.5, 0, 0, 0, -2.2, -3.6, -4.2, -3.6, -2.2, 0, 0, 0];
+  const hopSquash = response.interpolate({
+    inputRange: [0, .09, .13, .21, .41, .47, .54, .58, .66, .78, .82, .88, 1],
+    outputRange: [1, .9, 1.05, 1, 1.03, .88, 1, .94, 1.02, 1.02, .93, 1, 1],
+  });
   const headTurn = Animated.add(
     idle.interpolate({
       inputRange: peck ? peckPhases : [0, .2, .4, .6, .8, 1],
@@ -401,8 +490,8 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
         width: `${(width / (wide ? 800 : 600)) * 100}%`,
         height: `${(height / (wide ? 440 : 520)) * 100}%`,
         transform: [
-          { translateX: turtle ? idle.interpolate({ inputRange: TURTLE_ROUTE_PHASES, outputRange: TURTLE_ROUTE.map((point) => point.x * sceneScale) }) : 0 },
-          { translateY: turtle ? idle.interpolate({ inputRange: TURTLE_ROUTE_PHASES, outputRange: TURTLE_ROUTE.map((point) => point.y * sceneScale) }) : 0 },
+          { translateX: turtle ? idle.interpolate({ inputRange: TURTLE_ROUTE_PHASES, outputRange: turtlePoints.map((point) => point.x * sceneScale) }) : 0 },
+          { translateY: turtle ? idle.interpolate({ inputRange: TURTLE_ROUTE_PHASES, outputRange: turtlePoints.map((point) => point.y * sceneScale) }) : 0 },
         ],
       }}
     >
@@ -410,16 +499,13 @@ function PondNeighbor({ kind, wide, motion, paused, active }) {
         <Ellipse cx="23" cy={height - 6} rx="16" ry="3" fill="#a6b895" opacity=".55" />
       </Svg>}
       {turtle ? <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <TurtleBody route={idle} feet={feet} response={response} limbs={limbs} enabled={enabled} walking={walking} />
+        <TurtleBody route={idle} path={turtlePath} feet={feet} response={response} limbs={limbs} enabled={enabled} walking={walking} />
       </View> : <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, {
+        transformOrigin: "50% 89%",
         transform: [
-          { translateY: peck ? 0 : Animated.add(
-            idle.interpolate({ inputRange: [0, .2, .35, .5, .65, 1], outputRange: [0, 0, -5, 0, -3, 0] }),
-            response.interpolate({
-              inputRange: [0, .1, .22, .34, .44, .54, .66, .78, .9, 1],
-              outputRange: [0, -3, -6, -3, 0, 0, -5, -2.5, 0, 0],
-            }),
-          ) },
+          { translateY: peck ? 0 : response.interpolate({ inputRange: hopPhases, outputRange: hopHeight }) },
+          { scaleY: peck ? 1 : hopSquash },
+          { scaleX: peck ? 1 : hopSquash.interpolate({ inputRange: [.88, 1, 1.05], outputRange: [1.06, 1, .98] }) },
         ],
       }]}>
         <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} accessible={false}>
@@ -848,6 +934,14 @@ function Capy({
             ))}
           </G>
         )}
+        {accessory === "leaf" && (
+          <G transform={`rotate(${-7 + 9 * petWiggle} 285 137)`}>
+            <Ellipse cx="284" cy="138" rx="35" ry="5" fill="#815d41" opacity=".15" />
+            <Path d="M246 136 Q255 105 282 112 Q305 102 324 133 Q305 143 284 135 Q266 146 246 136Z" fill="#8fab7d" stroke="#6c8953" strokeWidth="2" />
+            <Path d="M253 134 Q284 123 316 132 M283 128 L273 117 M285 128 L299 115 M268 130 L261 123 M300 130 L309 122" fill="none" stroke="#b9cfae" strokeWidth="2" strokeLinecap="round" />
+            <Path d="M283 126 Q279 110 286 102" fill="none" stroke="#6c8953" strokeWidth="3" strokeLinecap="round" />
+          </G>
+        )}
         {accessory === "towel" && (
           <G transform="rotate(-8 280 130)">
             <Rect
@@ -923,23 +1017,51 @@ function Capy({
   );
 }
 
-// 启动插画保持静态，读取动画偏好前也不会产生非必要动态。
-export function CapyStartupIllustration() {
+// 仅水面轻轻扩散；默认静态，等读取动画偏好后再启用。
+export function CapyStartupIllustration({ motion = false }) {
+  const ripple = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    ripple.setValue(0);
+    if (!motion) return;
+    const animation = Animated.loop(Animated.timing(ripple, {
+      toValue: 1,
+      duration: 3200,
+      easing: Easing.linear,
+      useNativeDriver: Platform.OS !== "web",
+      isInteraction: false,
+    }));
+    animation.start();
+    return () => animation.stop();
+  }, [motion, ripple]);
   return (
-    <Svg width="100%" height="100%" viewBox="90 35 400 330" accessible={false}>
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Svg width="100%" height="100%" viewBox="90 35 400 330" style={StyleSheet.absoluteFill}>
       <Circle cx="290" cy="185" r="140" fill="#e8eeda" />
       <Path d="M167 234 Q133 214 145 191 Q170 197 167 234 M409 232 Q440 205 428 183 Q403 196 409 232" fill="#83b39d" />
       <Ellipse cx="290" cy="287" rx="165" ry="55" fill="#e8eeda" />
       <Ellipse cx="290" cy="278" rx="153" ry="48" fill="#83b39d" />
-      <Ellipse cx="290" cy="275" rx="130" ry="35" fill="none" stroke="#f7f8f2" strokeWidth="2" opacity="0.5" />
+      <Ellipse cx="290" cy="275" rx="139" ry="39" fill="none" stroke="#f7f8f2" strokeWidth="1.5" opacity="0.35" />
+      </Svg>
+      <Animated.View style={[StyleSheet.absoluteFill, {
+        opacity: motion ? ripple.interpolate({ inputRange: [0, 0.2, 0.65, 1], outputRange: [0, 0.48, 0.28, 0] }) : 0.28,
+        transformOrigin: "50% 73.6364%",
+        transform: [{ scale: motion ? ripple.interpolate({ inputRange: [0, 1], outputRange: [0.78, 1.12] }) : 1 }],
+      }]}>
+        <Svg width="100%" height="100%" viewBox="90 35 400 330">
+          <Ellipse cx="290" cy="278" rx="131" ry="35" fill="none" stroke="#f7f8f2" strokeWidth="2" />
+        </Svg>
+      </Animated.View>
+      <Svg width="100%" height="100%" viewBox="90 35 400 330" style={StyleSheet.absoluteFill}>
       <Capy mini blink turn={1} />
       <Path d="M186 260 Q290 309 394 260 Q381 310 290 313 Q199 310 186 260Z" fill="#83b39d" />
-      <Path d="M209 284 Q232 291 251 289 M321 289 Q343 291 365 284" fill="none" stroke="#f7f8f2" strokeWidth="3" strokeLinecap="round" />
+      <Path d="M210 278 Q225 284 241 282 M333 282 Q351 284 367 277" fill="none" stroke="#f7f8f2" strokeWidth="2.5" strokeLinecap="round" opacity="0.8" />
+      <Path d="M249 301 Q287 308 322 301" fill="none" stroke="#f7f8f2" strokeWidth="1.8" strokeLinecap="round" opacity="0.45" />
       <G fill="none" stroke="#54764f" strokeWidth="3" strokeLinecap="round" opacity="0.35">
         <Path d="M190 163 C174 146 200 135 189 118" />
         <Path d="M390 156 C374 139 400 128 389 111" />
       </G>
-    </Svg>
+      </Svg>
+    </View>
   );
 }
 
@@ -980,7 +1102,6 @@ export default function CapyScene({
   const bob = useRef(new Animated.Value(0)).current;
   const steam = useRef(new Animated.Value(0)).current;
   const breeze = useRef(new Animated.Value(0)).current;
-  const flight = useRef(new Animated.Value(0)).current;
   const cloud = useRef(new Animated.Value(0)).current;
   const hearts = useRef(new Animated.Value(0)).current;
   const petAnimation = useRef(new Animated.Value(0)).current;
@@ -1139,7 +1260,6 @@ export default function CapyScene({
       bob.setValue(0);
       steam.setValue(0);
       breeze.setValue(0);
-      flight.setValue(0);
       cloud.setValue(0);
       return;
     }
@@ -1178,17 +1298,7 @@ export default function CapyScene({
         isInteraction: false,
       }),
     );
-    const birds = Animated.loop(
-      Animated.timing(flight, {
-        toValue: 1,
-        duration: 17000,
-        easing: Easing.linear,
-        useNativeDriver: Platform.OS !== "web",
-        isInteraction: false,
-      }),
-    );
     wind.start();
-    birds.start();
     const clouds = Animated.loop(
       Animated.sequence([
         Animated.timing(cloud, {
@@ -1217,12 +1327,11 @@ export default function CapyScene({
       float.stop();
       mist.stop();
       wind.stop();
-      birds.stop();
       clouds.stop();
       clearInterval(timer);
       clearTimeout(timeout);
     };
-  }, [motion, bob, steam, breeze, flight, cloud]);
+  }, [motion, bob, steam, breeze, cloud]);
   useEffect(() => {
     if (pose?.satisfied) setSipCelebration((count) => count + 1);
   }, [pose?.satisfied]);
@@ -1448,28 +1557,10 @@ export default function CapyScene({
         <Path d="M510 242 Q499 201 521 182 Q535 212 524 235 Q546 195 565 199 Q561 236 523 255Z" fill="#7e9e70" />
         <Path d="M543 248 Q544 218 560 215" stroke="#98b28a" strokeWidth="7" strokeLinecap="round" />
       </SceneryLayer>
-      <SceneryLayer
-        frame={frame}
-        wide={wide}
-        origin={[366, 65]}
-        opacity={motion ? flight.interpolate({
-          inputRange: [0, 0.12, 0.83, 1],
-          outputRange: [0, 1, 1, 0],
-        }) : 1}
-        transform={[
-          { translateX: flight.interpolate({ inputRange: [0, 1], outputRange: [0, 100] }) },
-          { translateY: flight.interpolate({ inputRange: [0, 1], outputRange: [0, -19] }) },
-          { scaleY: flight.interpolate({ inputRange: BIRD_FLAP_PHASES, outputRange: BIRD_WING_SCALE }) },
-        ]}
-      >
-        <Path
-          d="M350 68 Q355 63 360 68 Q365 63 370 68 M371 59 Q375 55 379 59 Q383 55 387 59"
-          stroke="#8da284"
-          strokeWidth="2"
-          strokeLinecap="round"
-          fill="none"
-        />
-      </SceneryLayer>
+      {[0, 1].map((index) => (
+        <SkyBird key={index} index={index} frame={frame} wide={wide}
+          motion={motion} paused={paused} active={active} />
+      ))}
       <SceneryLayer
         frame={frame}
         wide={wide}

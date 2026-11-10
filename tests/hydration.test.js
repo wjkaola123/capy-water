@@ -12,9 +12,10 @@ import {
   nextReminder,
   companionDays,
   waterGardenData,
+  weeklyWaterGarden,
 } from "../src/hydration.js";
 
-test("水分花园按本地日期统计7、30、90天，平均值只计记录日", () => {
+test("水分花园按本地日期统计7天和4周，平均值只计记录日", () => {
   const now = new Date(2027, 0, 2, 0, 5);
   const entries = [
     createEntry(250, new Date(2026, 11, 31, 23, 59)),
@@ -23,7 +24,7 @@ test("水分花园按本地日期统计7、30、90天，平均值只计记录日
     createEntry(1000, new Date(2027, 0, 3)),
     createEntry(1000, new Date(2026, 8, 1)),
   ];
-  for (const range of [7, 30, 90]) {
+  for (const range of [7, 28]) {
     const result = waterGardenData(entries, range, now);
     assert.equal(result.days.length, range);
     assert.equal(result.days.at(-1).key, "2027-01-02");
@@ -32,8 +33,8 @@ test("水分花园按本地日期统计7、30、90天，平均值只计记录日
     assert.equal(result.recordedDays, 2);
     assert.equal(result.average, 500);
   }
-  assert.equal(waterGardenData([], 30, now).average, 0);
-  assert.equal(waterGardenData([], 30, new Date(2026, 2, 1)).days[0].key, "2026-01-31");
+  assert.equal(waterGardenData([], 28, now).average, 0);
+  assert.equal(waterGardenData([], 28, new Date(2026, 2, 1)).days[0].key, "2026-02-02");
 });
 
 test("饮料选择可恢复，旧数据和未知饮料默认使用茶", () => {
@@ -99,6 +100,12 @@ test("提醒遵循清醒时段，过了最后一条顺延明天", () => {
   assert.equal(nextReminder({ ...config, enabled: false }), null);
   assert.deepEqual(reminderSlots({ ...config, interval: 0 }), []);
 });
+test("叶帽装扮保存后可恢复，未知装扮回退为橘子", () => {
+  const saved = JSON.stringify({ ...INITIAL_STATE, accessory: "leaf" });
+  assert.equal(restoreHydration(saved).accessory, "leaf");
+  assert.equal(restoreHydration(JSON.stringify({ ...INITIAL_STATE, accessory: "unknown" })).accessory, "orange");
+});
+
 test("互动特效可恢复，旧数据和未知特效使用爱心", () => {
   const legacy = { ...INITIAL_STATE };
   delete legacy.effect;
@@ -111,4 +118,19 @@ test("互动特效可恢复，旧数据和未知特效使用爱心", () => {
     restoreHydration(JSON.stringify({ ...legacy, effect: "unknown" })).effect,
     "hearts",
   );
+});
+
+test("四周按本地日期分为四组七天，日均包含未记录日，排除范围外记录", () => {
+  const now = new Date(2027, 0, 3, 12);
+  const first = new Date(2026, 11, 7, 23, 59);
+  const entries = [createEntry(700, first), createEntry(1400, new Date(2026, 11, 14, 0)), createEntry(350, now), createEntry(500, new Date(2026, 11, 6)), createEntry(500, new Date(2027, 0, 4))];
+  const weeks = weeklyWaterGarden(entries, now);
+  assert.equal(weeks.length, 4);
+  assert.ok(weeks.every((week) => week.days.length === 7));
+  assert.equal(new Set(weeks.flatMap((week) => week.days.map((day) => day.key))).size, 28);
+  assert.equal(weeks[0].days[0].key, "2026-12-07");
+  assert.equal(weeks[3].days[6].key, "2027-01-03");
+  assert.deepEqual(weeks.map((week) => week.average), [100, 200, 0, 50]);
+  assert.deepEqual(weeks.map((week) => week.recordedDays), [1, 1, 0, 1]);
+  assert.ok(weeklyWaterGarden([], now).every((week) => week.average === 0 && week.recordedDays === 0));
 });
