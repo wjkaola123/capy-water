@@ -899,12 +899,6 @@ function AppContent() {
             >
               <View style={s.pageHeader}>
                 <View style={s.flex}>
-                  <View style={s.row}>
-                    <Text style={s.dateLabel}>
-                      {now.getMonth() + 1} 月 {now.getDate()} 日，星期
-                      {["日", "一", "二", "三", "四", "五", "六"][now.getDay()]}
-                    </Text>
-                  </View>
                   <Text
                     accessibilityRole="header"
                     style={[s.pageTitle, !desktop && { fontSize: 26 }]}
